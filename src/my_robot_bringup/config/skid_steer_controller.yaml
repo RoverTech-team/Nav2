@@ -1,0 +1,54 @@
+controller_manager:
+  ros__parameters:
+    update_rate: 50  # Hz
+    use_sim_time: false
+
+    diff_controller:
+      type: diff_drive_controller/DiffDriveController
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+diff_controller:
+  ros__parameters:
+    # 1. Map all 4 wheels (2 per side) for Skid Steer
+    left_wheel_names: ['base_front_left_wheel_joint', 'base_middle_left_wheel_joint', 'base_back_left_wheel_joint']
+    right_wheel_names: ['base_front_right_wheel_joint', 'base_middle_right_wheel_joint', 'base_back_right_wheel_joint']
+    
+    # 2. Base kinematics
+    wheel_separation: 0.35 # The actual physical distance between the left and right wheels
+    wheel_radius: 0.05     # The radius of your wheels in meters
+    
+    # 3. CRITICAL FOR SKID STEER: The separation multiplier
+    # Skid steer robots "scrub" or drag their wheels laterally when turning.
+    # The odometry needs to treat the wheelbase as wider than it physically is.
+    # For a 4-wheel rover, this is usually tuned between 1.2 and 1.8. 
+    wheel_separation_multiplier: 1.5 
+    
+    # 4. Odometry calculation
+    # MUST be false on real skid-steer hardware. If true, odometry is calculated 
+    # from velocity commands (which ignores wheel slip/scrub and causes massive drift).
+    # If false, it calculates odometry from actual wheel encoder feedback.
+    open_loop: false 
+
+    position_feedback: false
+
+    # 5. Frames
+    base_frame_id: base_link
+    odom_frame_id: odom
+    enable_odom_tf: true
+    publish_rate: 50.0
+
+    # 6. Velocity and Acceleration Limits
+    linear:
+      x:
+        has_velocity_limits: true
+        max_velocity: 1.0
+        has_acceleration_limits: true
+        max_acceleration: 0.5
+    angular:
+      z:
+        has_velocity_limits: true
+        max_velocity: 1.5
+        has_acceleration_limits: true
+        max_acceleration: 1.0
