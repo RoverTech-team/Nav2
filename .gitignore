@@ -17,3 +17,4 @@ install/COLCON_IGNORE
 *.log
 log/COLCON_IGNORE
 build/.built_by
+build/.cmake/api/v1/query/client-neocmake/
