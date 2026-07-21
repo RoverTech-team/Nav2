@@ -1,0 +1,415 @@
+import os
+import sys
+import time
+
+from ament_index_python.packages import get_package_share_directory
+from launch import LaunchDescription
+from launch.actions import (
+    DeclareLaunchArgument,
+    IncludeLaunchDescription,
+    OpaqueFunction,
+    TimerAction,
+)
+from launch.conditions import IfCondition
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import LaunchConfiguration
+from launch_ros.actions import Node
+
+
+# ── numpy compat shim ──────────────────────────────────────────────
+# Ubuntu ships python3-numpy 1.26.x in /usr/lib/python3/dist-packages.
+# numpy 2.x is often installed to ~/.local/lib via pip and is INCOMPATIBLE
+# with rclpy on ROS 2 Humble.  We strip the user site-packages path for
+# every Python node spawned by this launch file so the system numpy wins.
+_NUMPY_COMPAT_PATHS = [
+    "/usr/lib/python3/dist-packages",
+    "/opt/ros/humble/lib/python3/dist-packages",
+    "/home/RoverTech/ros2_humble/local/lib/python3.10/dist-packages",
+]
+
+_CLEANED_PYTHONPATH = ":".join(
+    p for p in sys.path
+    if "site-packages" not in p
+    or p in _NUMPY_COMPAT_PATHS
+    or p.startswith("/opt/ros")
+    or p.startswith("/usr")
+    or p.startswith("/home/RoverTech/ros2")
+)
+# Only set if we actually found offending paths
+_NUMPY_COMPAT_ENV = {}
+if any("site-packages" in p and p not in _NUMPY_COMPAT_PATHS for p in sys.path):
+    _NUMPY_COMPAT_ENV["PYTHONPATH"] = _CLEANED_PYTHONPATH
+# ── end shim ───────────────────────────────────────────────────────
+
+
+def _poll_for_map(map_path: str, timeout: float = 120.0, poll_interval: float = 0.5):
+    """Block until a real map .pgm+yaml pair is present on disk, or timeout."""
+    elapsed = 0.0
+    pgm_path = map_path.replace(".yaml", ".pgm")
+    while elapsed < timeout:
+        if os.path.isfile(map_path) and os.path.isfile(pgm_path):
+            pgm_size = os.path.getsize(pgm_path)
+            if pgm_size > 0:
+                return map_path
+        time.sleep(poll_interval)
+        elapsed += poll_interval
+    return map_path  # return whatever we have after timeout
+
+
+def _wait_and_save_map(context, *args, **kwargs):
+    """OpaqueFunction callback: generate a fresh map file if needed."""
+    generate_new = LaunchConfiguration("generate_new_map").perform(context) == "true"
+    map_arg = LaunchConfiguration("map").perform(context)
+
+    if not generate_new:
+        return []  # nothing to do — use whatever the map arg points to
+
+    if os.path.isfile(map_arg):
+        return []  # map already exists — do not overwrite
+
+    # Map missing and regeneration requested: wait for SLAM to produce one
+    resolved = _poll_for_map(map_arg, timeout=120.0, poll_interval=0.5)
+
+    # Wait one extra second for the .pgm write to finish and settle
+    time.sleep(1.0)
+
+    # map_saver_cli has built-in transient_local + save_map_timeout=2.0 defaults
+    abs_dir = os.path.dirname(os.path.abspath(resolved))
+    base_name = os.path.splitext(os.path.basename(resolved))[0]
+
+    return [
+        Node(
+            package="nav2_map_server",
+            executable="map_saver_cli",
+            output="screen",
+            cwd=abs_dir,
+            arguments=["-f", base_name],
+        ),
+        TimerAction(
+            period=5.0,  # give map_saver_cli enough time to finish
+            actions=[],
+        ),
+    ]
+
+
+def generate_launch_description():
+    bringup_share = get_package_share_directory("my_robot_bringup")
+    nav2_share = get_package_share_directory("nav2_bringup")
+
+    # ------------------------------------------------------------------
+    # Config file paths
+    # ------------------------------------------------------------------
+    robot_launch = os.path.join(bringup_share, "launch", "my_robot.launch.py")
+    pointcloud_params = os.path.join(bringup_share, "config", "pointcloud_to_laserscan_nav2.yaml")
+    slam_params = os.path.join(bringup_share, "config", "slam_toolbox_nav2.yaml")
+    nav2_params = os.path.join(bringup_share, "config", "nav2_params_rover.yaml")
+    default_map = os.path.join(bringup_share, "maps", "rover_real_map.yaml")
+    rviz_config = os.path.join(nav2_share, "rviz", "nav2_default_view.rviz")
+
+    return LaunchDescription(
+        [
+            # ------------------------------------------------------------------
+            # Launch arguments
+            # ------------------------------------------------------------------
+            DeclareLaunchArgument(
+                "start_robot_bringup", default_value="true",
+                description="Launch my_robot.launch.py (set false if already running)",
+            ),
+            DeclareLaunchArgument("use_rviz", default_value="true"),
+            DeclareLaunchArgument(
+                "generate_new_map", default_value="false",
+                description=(
+                    "If true and the map file does not exist, wait for SLAM to "
+                    "produce a live map and save it to disk before starting Nav2."
+                ),
+            ),
+            DeclareLaunchArgument("map", default_value=default_map),
+            DeclareLaunchArgument(
+                "pointcloud_topic",
+                default_value="/zed/zed_node/point_cloud/cloud_registered",
+            ),
+            DeclareLaunchArgument("scan_topic", default_value="/zed/scan"),
+
+            # ------------------------------------------------------------------
+            # 1. Robot bringup — RSP + ros2_control + EtherCAT + ZED wrapper
+            # ------------------------------------------------------------------
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(robot_launch),
+                launch_arguments={
+                    "use_rviz": "true",
+                    "camera_model": "zed2i",
+                    "publish_tf": "false",
+                    "publish_map_tf": "false",
+                }.items(),
+                condition=IfCondition(LaunchConfiguration("start_robot_bringup")),
+            ),
+
+            # ------------------------------------------------------------------
+            # 2. Pointcloud → LaserScan  (ZED 2i → 2D scan)
+            # ------------------------------------------------------------------
+            Node(
+                package="pointcloud_to_laserscan",
+                executable="pointcloud_to_laserscan_node",
+                name="pointcloud_to_laserscan",
+                output="screen",
+                parameters=[pointcloud_params],
+                remappings=[
+                    ("cloud_in", LaunchConfiguration("pointcloud_topic")),
+                    ("scan", LaunchConfiguration("scan_topic")),
+                ],
+            ),
+
+            # ------------------------------------------------------------------
+            # 3. SLAM Toolbox  (online, async, real-time mapping)
+            # ------------------------------------------------------------------
+            Node(
+                package="slam_toolbox",
+                executable="async_slam_toolbox_node",
+                name="slam_toolbox",
+                output="screen",
+                parameters=[
+                    slam_params,
+                    {
+                        "use_sim_time": False,
+                        "scan_topic": LaunchConfiguration("scan_topic"),
+                    },
+                ],
+            ),
+
+            # ------------------------------------------------------------------
+            # 4. Nav2 cmd-vel relay  (safety clamp: ±0.25 m/s linear, ±0.50 rad/s angular)
+            # ------------------------------------------------------------------
+            Node(
+                package="my_robot_bringup",
+                executable="nav2_cmd_vel_relay.py",
+                name="nav2_cmd_vel_relay",
+                output="screen",
+                env=_NUMPY_COMPAT_ENV,
+                parameters=[
+                    {
+                        "input_topic": "/cmd_vel",
+                        "output_topic": "/diff_drive_controller/cmd_vel",
+                        "output_stamped": True,
+                        "frame_id": "base_footprint",
+                        "max_linear_x": 0.25,
+                        "max_angular_z": 0.50,
+                        "command_timeout": 0.5,
+                        "publish_zero_on_timeout": True,
+                    }
+                ],
+            ),
+
+            # ------------------------------------------------------------------
+            # 5. Live-map generation: wait for SLAM, then save to disk
+            #    (runs only when generate_new_map:=true AND map file is missing)
+            # ------------------------------------------------------------------
+            OpaqueFunction(function=_wait_and_save_map),
+
+            # ------------------------------------------------------------------
+            # 6. Nav2 — individual nodes (replaces bringup_launch.py)
+            # ------------------------------------------------------------------
+            # 6a. Map Server — loads the persisted map for AMCL
+            #     yaml_filename is resolved from launch arg before the node is built
+            TimerAction(
+                period=0.1,
+                actions=[
+                    Node(
+                        package="nav2_map_server",
+                        executable="map_server",
+                        name="map_server",
+                        output="screen",
+                        parameters=[
+                            nav2_params,
+                            {
+                                "use_sim_time": False,
+                                "yaml_filename": LaunchConfiguration("map"),
+                            }
+                        ],
+                    ),
+                ],
+            ),
+
+            # 6b. AMCL — Monte Carlo localization on the loaded map
+            TimerAction(
+                period=2.0,
+                actions=[
+                    Node(
+                        package="nav2_amcl",
+                        executable="amcl",
+                        name="amcl",
+                        output="screen",
+                        parameters=[
+                            nav2_params,
+                            {
+                                "use_sim_time": False,
+                            }
+                        ],
+                    ),
+                ],
+            ),
+
+            # 6c. Controller Server — local path following (DWB planner)
+            TimerAction(
+                period=4.0,
+                actions=[
+                    Node(
+                        package="nav2_controller",
+                        executable="controller_server",
+                        name="controller_server",
+                        output="screen",
+                        parameters=[
+                            nav2_params,
+                            {"use_sim_time": False},
+                        ],
+                        # No remap — Nav2 publishes /cmd_vel, relay picks it up
+                    ),
+                ],
+            ),
+
+            # 6d. Planner Server — global path planning (NavFn)
+            TimerAction(
+                period=6.0,
+                actions=[
+                    Node(
+                        package="nav2_planner",
+                        executable="planner_server",
+                        name="planner_server",
+                        output="screen",
+                        parameters=[
+                            nav2_params,
+                            {"use_sim_time": False},
+                        ],
+                    ),
+                ],
+            ),
+
+            # 6e. BT Navigator — high-level goal execution via behavior tree
+            TimerAction(
+                period=8.0,
+                actions=[
+                    Node(
+                        package="nav2_bt_navigator",
+                        executable="bt_navigator",
+                        name="bt_navigator",
+                        output="screen",
+                        parameters=[
+                            nav2_params,
+                            {"use_sim_time": False},
+                        ],
+                    ),
+                ],
+            ),
+
+            # 6f. Behavior Server — recovery behaviors (optional, kept from nav2_params_rover.yaml)
+            TimerAction(
+                period=10.0,
+                actions=[
+                    Node(
+                        package="nav2_behaviors",
+                        executable="behavior_server",
+                        name="behavior_server",
+                        output="screen",
+                        parameters=[
+                            nav2_params,
+                            {"use_sim_time": False},
+                        ],
+                    ),
+                ],
+            ),
+
+            # 6g. smoother_server — path smoothing
+            TimerAction(
+                period=12.0,
+                actions=[
+                    Node(
+                        package="nav2_smoother",
+                        executable="smoother_server",
+                        name="smoother_server",
+                        output="screen",
+                        parameters=[
+                            nav2_params,
+                            {"use_sim_time": False},
+                        ],
+                    ),
+                ],
+            ),
+
+            # 6h. waypoint_follower
+            TimerAction(
+                period=14.0,
+                actions=[
+                    Node(
+                        package="nav2_waypoint_follower",
+                        executable="waypoint_follower",
+                        name="waypoint_follower",
+                        output="screen",
+                        parameters=[
+                            nav2_params,
+                            {"use_sim_time": False},
+                        ],
+                    ),
+                ],
+            ),
+
+            # 6i. velocity_smoother
+            TimerAction(
+                period=16.0,
+                actions=[
+                    Node(
+                        package="nav2_velocity_smoother",
+                        executable="velocity_smoother",
+                        name="velocity_smoother",
+                        output="screen",
+                        parameters=[
+                            nav2_params,
+                            {"use_sim_time": False},
+                        ],
+                    ),
+                ],
+            ),
+
+            # 6j. Lifecycle Manager — brings up / shuts down all Nav2 nodes in order
+            TimerAction(
+                period=18.0,
+                actions=[
+                    Node(
+                        package="nav2_lifecycle_manager",
+                        executable="lifecycle_manager",
+                        name="lifecycle_manager_navigation",
+                        output="screen",
+                        parameters=[
+                            {
+                                "use_sim_time": False,
+                                "autostart": True,
+                                # Order of the list = startup order
+                                "node_names": [
+                                    "map_server",
+                                    "amcl",
+                                    "planner_server",
+                                    "controller_server",
+                                    "bt_navigator",
+                                    "behavior_server",
+                                    "smoother_server",
+                                    "waypoint_follower",
+                                    "velocity_smoother",
+                                ],
+                            }
+                        ],
+                    ),
+                ],
+            ),
+
+            # ------------------------------------------------------------------
+            # 7. RViz2  (Nav2 default view — Fixed Frame set to "map")
+            # ------------------------------------------------------------------
+            Node(
+                package="rviz2",
+                executable="rviz2",
+                name="rviz2",
+                output="screen",
+                arguments=["-d", rviz_config],
+                parameters=[{"use_sim_time": False}],
+                condition=IfCondition(LaunchConfiguration("use_rviz")),
+            ),
+        ]
+    )
