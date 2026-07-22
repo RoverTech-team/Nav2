@@ -1,0 +1,8 @@
+aruco_detection_dev:
+  ros__parameters:
+    camera_id: 0
+    marker_size: 0.15
+    aruco_dictionaries: ["DICT_6X6_250", "DICT_7X7_250"]
+    marker_frame: camera_link
+    publish_rate: 10.0
+    show_preview: true

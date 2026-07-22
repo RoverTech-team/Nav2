@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ArUco Mapping — RoverTech Nav2 Integration Plan</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --card: #161b22;
+    --border: #30363d;
+    --text: #c9d1d9;
+    --heading: #f0f6fc;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --orange: #d29922;
+    --red: #f85149;
+    --code-bg: #1c2128;
+    --section1: #3fb950;
+    --section2: #d29922;
+    --section3: #f85149;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    padding: 2rem;
+    max-width: 960px;
+    margin: 0 auto;
+  }
+  h1 { color: var(--heading); font-size: 2rem; margin-bottom: 0.25rem; }
+  h1 small { display: block; font-size: 1rem; font-weight: 400; color: var(--text); opacity: 0.7; margin-top: 0.25rem; }
+  h2 {
+    font-size: 1.5rem;
+    margin-top: 2.5rem;
+    margin-bottom: 0.75rem;
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
+    color: var(--bg);
+  }
+  h2.section1 { background: var(--section1); }
+  h2.section2 { background: var(--section2); }
+  h2.section3 { background: var(--section3); }
+  h2.ref { background: var(--border); color: var(--text); font-size: 1.2rem; }
+  h3 { color: var(--heading); font-size: 1.1rem; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+  p, li { margin-bottom: 0.5rem; }
+  ul, ol { padding-left: 1.5rem; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    padding: 0.15em 0.4em;
+    border-radius: 4px;
+    font-size: 0.9em;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    color: var(--green);
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem;
+    overflow-x: auto;
+    margin: 0.75rem 0;
+    font-size: 0.85rem;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+  pre code { background: none; border: none; padding: 0; color: inherit; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.25rem;
+    margin: 1rem 0;
+  }
+  .card.s1 { border-left: 4px solid var(--section1); }
+  .card.s2 { border-left: 4px solid var(--section2); }
+  .card.s3 { border-left: 4px solid var(--section3); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; margin: 1rem 0; }
+  .tag {
+    display: inline-block;
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 0.15em 0.5em;
+    border-radius: 3px;
+    margin-left: 0.4em;
+    vertical-align: middle;
+  }
+  .tag-done { background: #1b3a1d; color: var(--green); }
+  .tag-next { background: #3d2e00; color: var(--orange); }
+  .tag-future { background: #1c2128; color: var(--text); }
+  .tag-cpp { background: #1a2d4a; color: var(--accent); }
+  .tag-py { background: #1d3d2d; color: var(--green); }
+  .tag-s1 { background: #1b3a1d; color: var(--section1); }
+  .tag-s2 { background: #3d2e00; color: var(--section2); }
+  .tag-s3 { background: #3d0000; color: var(--section3); }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0.75rem 0;
+  }
+  th, td {
+    text-align: left;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+  }
+  th { color: var(--heading); font-weight: 600; }
+  .diagram {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.5rem;
+    margin: 1rem 0;
+    font-family: 'SF Mono', monospace;
+    font-size: 0.8rem;
+    line-height: 1.5;
+    white-space: pre;
+    overflow-x: auto;
+  }
+  .meta { color: var(--text); opacity: 0.6; font-size: 0.85rem; margin-bottom: 1.5rem; }
+  .toc { margin: 1.5rem 0; padding: 1rem; background: var(--card); border-radius: 8px; border: 1px solid var(--border); }
+  .toc a { display: block; padding: 0.3rem 0; }
+  .toc .s1 { color: var(--section1); font-weight: 600; }
+  .toc .s2 { color: var(--section2); font-weight: 600; }
+  .toc .s3 { color: var(--section3); font-weight: 600; }
+  .file-tree { font-family: 'SF Mono', monospace; font-size: 0.85rem; line-height: 1.7; }
+  .file-tree .dir { color: var(--accent); }
+  .file-tree .new::after { content: ' +'; color: var(--green); font-weight: 700; }
+  .file-tree .mod::after { content: ' ~'; color: var(--orange); font-weight: 700; }
+  .nav-links { display: flex; gap: 1rem; justify-content: center; margin: 1rem 0; flex-wrap: wrap; }
+  .nav-links a {
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: var(--bg);
+    text-decoration: none;
+  }
+  .nav-links a.s1b { background: var(--section1); }
+  .nav-links a.s2b { background: var(--section2); }
+  .nav-links a.s3b { background: var(--section3); }
+  .nav-links a.rb { background: var(--border); color: var(--text); }
+  .step { margin: 1rem 0; padding: 0.75rem; background: var(--code-bg); border-radius: 6px; border: 1px solid var(--border); }
+  .step .num { display: inline-block; width: 1.5rem; height: 1.5rem; line-height: 1.5rem; text-align: center; border-radius: 50%; margin-right: 0.5rem; font-size: 0.8rem; font-weight: 700; color: var(--bg); }
+  .step .num.n1 { background: var(--section1); }
+  .step .num.n2 { background: var(--section2); }
+  .step .num.n3 { background: var(--section3); }
+  .step .num.nr { background: var(--border); }
+  @media (max-width: 600px) { body { padding: 1rem; } }
+</style>
+</head>
+<body>
+
+<h1>ArUco Mapping <small>RoverTech Nav2 — Marker-Augmented Attitude &amp; Navigation</small></h1>
+
+<div class="meta">
+  <span>Last updated: 2026-07-21</span> &middot;
+  <span>ROS 2 Humble</span> &middot;
+  <span>macOS dev → Jetson deployment</span>
+</div>
+
+<div class="nav-links">
+  <a href="#s1" class="s1b">1. Current</a>
+  <a href="#s2" class="s2b">2. Yaw Correction</a>
+  <a href="#s3" class="s3b">3. Objectives to Reach</a>
+  <a href="#ref" class="rb">Reference</a>
+</div>
+
+<div class="toc">
+  <strong>Contents</strong>
+  <a href="#s1" class="s1">&#9670; Section 1 — Current: Webcam ArUco Detection</a>
+  <a href="#s1-stack" style="padding-left:1.5rem;">Current stack</a>
+  <a href="#s1-package" style="padding-left:1.5rem;">Package: aruco_detection_dev</a>
+  <a href="#s1-verification" style="padding-left:1.5rem;">Verification results</a>
+  <a href="#s1-usage" style="padding-left:1.5rem;">How to use</a>
+
+  <a href="#s2" class="s2">&#9670; Section 2 — Attitude Determination via Yaw Correction</a>
+  <a href="#s2-overview" style="padding-left:1.5rem;">Concept &amp; data flow</a>
+  <a href="#s2-production" style="padding-left:1.5rem;">ZED 2i production detection</a>
+  <a href="#s2-attitude" style="padding-left:1.5rem;">Attitude node: marker normal → yaw correction</a>
+  <a href="#s2-fusion" style="padding-left:1.5rem;">Sensor fusion with robot_localization EKF</a>
+
+  <a href="#s3" class="s3">&#9670; Section 3 — ArUco Markers as Objectives to Reach</a>
+  <a href="#s3-overview" style="padding-left:1.5rem;">Concept &amp; use cases</a>
+  <a href="#s3-bt-nodes" style="padding-left:1.5rem;">Nav2 BT plugins (C++)</a>
+  <a href="#s3-behaviors" style="padding-left:1.5rem;">Behavior server plugins</a>
+  <a href="#s3-waypoints" style="padding-left:1.5rem;">Waypoint task executor</a>
+  <a href="#s3-docking" style="padding-left:1.5rem;">Precision docking</a>
+
+  <a href="#ref" style="padding-left:1.5rem;">Build &amp; Deploy &middot; Test Markers &middot; File Inventory &middot; Dependencies</a>
+</div>
+
+<!-- ======================================================================== -->
+<!--  SECTION 1: CURRENT                                                       -->
+<!-- ======================================================================== -->
+<h2 id="s1" class="section1">Section 1 — Current: Webcam ArUco Detection</h2>
+
+<h3 id="s1-stack">What exists now</h3>
+
+<div class="diagram">
+                         CURRENT STATE (macOS dev)
+  ┌────────────────────────────────────────────────────────────┐
+  │                     APPLICATION                            │
+  │  (none yet — this is the foundation layer)                 │
+  └────────────────────────────────────────────────────────────┘
+  ┌────────────────────────────────────────────────────────────┐
+  │                     LOCALIZATION                           │
+  │  (none yet — Phase 2)                                     │
+  └────────────────────────────────────────────────────────────┘
+  ┌────────────────────────────────────────────────────────────┐
+  │                     DETECTION  ▲ DONE                       │
+  │  ┌──────────────────────────────────────────────────┐     │
+  │  │        aruco_detection_dev                       │     │
+  │  │  • Mac webcam (AVFoundation)                     │     │
+  │  │  • Multi-dictionary (6x6 + 7x7 + 4x4 + 5x5)     │     │
+  │  │  • cv2.imshow preview window                     │     │
+  │  │  • PoseArray on /aruco_dev/markers               │     │
+  │  │  • Console logging of tvec + distance            │     │
+  │  └──────────────────────────────────────────────────┘     │
+  └────────────────────────────────────────────────────────────┘
+  ┌────────────────────────────────────────────────────────────┐
+  │                     HARDWARE                               │
+  │  MacBook FaceTime HD Camera (1920x1080)                    │
+  └────────────────────────────────────────────────────────────┘
+</div>
+
+<div class="grid">
+  <div class="card s1">
+    <h3>Current Pipeline</h3>
+    <pre><code>Webcam ──► aruco_detection_dev
+               │ Console: "Marker 42 — tvec: [0.096, 0.227, 1.103], distance: 1.13m"
+               │ Topic: /aruco_dev/markers (PoseArray)
+               │ GUI: annotated preview window</code></pre>
+  </div>
+  <div class="card s1">
+    <h3>Key Capabilities</h3>
+    <ul>
+      <li>Auto-detects camera via AVFoundation backend</li>
+      <li>Scans 5 dictionary families per frame (4×4 through 7×7 + original)</li>
+      <li>Estimates pose via <code>estimatePoseSingleMarkers</code></li>
+      <li>Handles NaN/Inf guard, rate limiting</li>
+      <li>Clean shutdown with camera release</li>
+    </ul>
+  </div>
+</div>
+
+<h3 id="s1-package">Package: aruco_detection_dev</h3>
+
+<div class="file-tree">
+<span class="dir">src/aruco_detection_dev/</span>        <span class="tag tag-s1">SECTION 1</span>
+├── <span>package.xml</span>                    <span class="tag tag-done">DONE</span>
+├── <span>setup.py</span>                        <span class="tag tag-done">DONE</span>
+├── <span>resource/aruco_detection_dev</span>     <span class="tag tag-done">DONE</span>
+├── <span>config/webcam_params.yaml</span>        <span class="tag tag-done">DONE</span>
+├── <span>aruco_detection_dev/detection_node.py</span>  <span class="tag tag-done">DONE</span>
+└── <span>launch/demo.launch.py</span>             <span class="tag tag-done">DONE</span>
+</div>
+
+<h3 id="s1-verification">Verification Results</h3>
+
+<table>
+  <tr><th>Test</th><th>Result</th></tr>
+  <tr><td>Camera opens (AVFoundation, 1920x1080)</td><td>&#10003; Pass</td></tr>
+  <tr><td>Multi-dictionary detection (6x6 + 7x7)</td><td>&#10003; Pass</td></tr>
+  <tr><td>Marker 42 (DICT_6X6_250) at 1.13m</td><td>&#10003; <code>tvec: [0.096, 0.227, 1.103]</code></td></tr>
+  <tr><td>Marker 0 (DICT_7X7_250) at 0.73m</td><td>&#10003; <code>tvec: [-0.123, 0.116, 0.707]</code></td></tr>
+  <tr><td><code>/aruco_dev/markers</code> topic publishing</td><td>&#10003; 1 publisher, geometry_msgs/PoseArray</td></tr>
+  <tr><td>Multiple dictionaries per frame</td><td>&#10003; Tries all configured until match</td></tr>
+</table>
+
+<h3 id="s1-usage">How to Run</h3>
+
+<pre><code>export ROS_LOCALHOST_ONLY=1
+source ~/Documents/Polispace/ros2_humble/local_setup.zsh
+source ~/Documents/Polispace/Nav2/install/local_setup.zsh
+detection_node
+
+# In another terminal:
+ros2 topic echo /aruco_dev/markers
+</code></pre>
+
+<!-- ======================================================================== -->
+<!--  SECTION 2: ATTITUDE DETERMINATION                                        -->
+<!-- ======================================================================== -->
+<h2 id="s2" class="section2">Section 2 — Attitude Determination via Yaw Correction from Wall Markers</h2>
+
+<h3 id="s2-overview">Concept</h3>
+
+<p>Wall-mounted ArUco markers (<strong>all vertical surfaces</strong>) provide a compass-like yaw reference to correct the biggest drift mode for skid-steer rovers. The marker's surface normal vector is extracted from each single-frame ArUco detection, transformed to <code>base_link</code>, and projected to the horizontal plane. Comparing the measured normal angle against the wall's known azimuth (measured once with a compass during deployment) yields an absolute yaw observation. A <code>robot_localization</code> EKF fuses this yaw with wheel odometry (x, y, twist) and ZED IMU (roll, pitch) for drift-corrected 6-DOF attitude.</p>
+
+<div class="diagram">
+                    ATTITUDE DETERMINATION PIPELINE (YAW-ONLY)
+  ┌─────────────────────────────────────────────────────────────────────┐
+  │                                                                     │
+  │                ┌─────────────────────────┐                          │
+  │  Marker at     │  aruco_attitude_node     │                          │
+  │  known azimuth │                         │                          │
+  │  ┌──────────┐  │  1. Marker normal in     │                          │
+  │  │ id: 42   │  │     camera frame (rvec)  │                          │
+  │  │ azim: 90°│  │  2. Transform to base    │                          │
+  │  └──────────┘  │     via static TF lookup  │                          │
+  │                │  3. Project onto XY plane │                          │
+  │                │  4. ψ = azimuth − atan2(n)│                          │
+  │                │  5. Average across visible│                          │
+  │                │     markers (circular)    │                          │
+  │                │  6. Publish               │                          │
+  │                │     /aruco/attitude       │                          │
+  │                │     (PoseWithCovariance)  │                          │
+  │                └──────────┬──────────────┘                          │
+  │                           │                                         │
+  │                           ▼                                         │
+  │                     ┌──────────────────┐                            │
+  │  Wheel odometry ──► │  robot_localiz.  │──► /odometry/filtered      │
+  │  /odom              │  ekf_filter_node  │    (drift-corrected)      │
+  │  ─────────────      │                  │                            │
+  │  x, y, vx, vy, vw   │  odom0: x,y,twist│                            │
+  │                     │                  │                            │
+  │  ZED IMU ─────────► │  imu0: roll,pitch│                            │
+  │  /zed/zed_node/     │                  │                            │
+  │  imu/data           │  pose0: yaw only │                            │
+  │                     │                  │                            │
+  │  ArUco yaw ───────► │  (low cov on     │                            │
+  │  /aruco/attitude    │   yaw, high on   │                            │
+  │                     │   rest)          │                            │
+  │                     └──────────────────┘                            │
+  └─────────────────────────────────────────────────────────────────────┘
+</div>
+
+<h3 id="s2-production">ZED 2i Production Detection</h3>
+
+<div class="card s2">
+  <p>Production node that subscribes to ZED 2i camera topics via <code>image_transport</code>, replacing the dev webcam's <code>cv2.VideoCapture</code>.</p>
+
+  <table>
+    <tr><th>Feature</th><th>Dev (Section 1)</th><th>Production (Section 2)</th></tr>
+    <tr><td>Camera source</td><td><code>cv2.VideoCapture</code> (webcam)</td><td><code>image_transport.Subscriber</code> (ZED topic)</td></tr>
+    <tr><td>Camera matrix</td><td>Estimated (focal = frame width)</td><td>From <code>/zed/zed_node/rgb/camera_info</code></td></tr>
+    <tr><td>Preview</td><td><code>cv2.imshow</code> window</td><td>Headless (optional debug topic)</td></tr>
+    <tr><td>Topic namespace</td><td><code>/aruco_dev/markers</code></td><td><code>/aruco/markers</code></td></tr>
+  </table>
+
+  <h3>New Package: src/aruco_detection/</h3>
+  <div class="file-tree">
+  <span class="dir">src/aruco_detection/</span>              <span class="tag tag-s2">SECTION 2</span>
+  ├── <span>package.xml</span>                   <span class="tag tag-done">DONE</span>
+  ├── <span>setup.py</span>                       <span class="tag tag-done">DONE</span>
+  ├── <span>resource/aruco_detection</span>        <span class="tag tag-done">DONE</span>
+  ├── <span>config/zed_params.yaml</span>          <span class="tag tag-done">DONE</span>
+  ├── <span>aruco_detection/__init__.py</span>     <span class="tag tag-done">DONE</span>
+  ├── <span>aruco_detection/detection_node.py</span> <span class="tag tag-done">DONE</span>
+  └── <span>launch/zed_detection.launch.py</span>   <span class="tag tag-done">DONE</span>
+  </div>
+
+  <h3>ZED Topics Used</h3>
+  <table>
+    <tr><th>Topic</th><th>Type</th><th>Purpose</th></tr>
+    <tr><td><code>/zed/zed_node/rgb/image_rect_color</code></td><td>sensor_msgs/Image</td><td>Rectified RGB (no lens distortion)</td></tr>
+    <tr><td><code>/zed/zed_node/rgb/camera_info</code></td><td>sensor_msgs/CameraInfo</td><td>Accurate camera matrix + distortion</td></tr>
+    <tr><td><code>/zed/zed_node/point_cloud/cloud_registered</code></td><td>PointCloud2</td><td>Optional depth refinement</td></tr>
+  </table>
+</div>
+
+<h3 id="s2-attitude">Attitude Node: Marker Normal → Yaw Correction</h3>
+
+<div class="card s2">
+  <p>For each detected wall marker, extracts the surface normal from the ArUco pose (rvec), converts to base_link frame, and computes absolute yaw from the known wall azimuth.</p>
+
+  <h3>Data Flow</h3>
+  <div class="step"><span class="num n2">1</span> Subscribe to <code>/aruco/markers</code> + <code>/aruco/marker_ids</code></div>
+  <div class="step"><span class="num n2">2</span> Look up <code>zed_camera_link → base_link</code> TF (static, cached)</div>
+  <div class="step"><span class="num n2">3</span> Extract rvec → marker orientation → normal vector in camera frame</div>
+  <div class="step"><span class="num n2">4</span> Transform normal to base_link, project onto XY plane → angle ψ</div>
+  <div class="step"><span class="num n2">5</span> Look up wall azimuth from config → <code>yaw = azimuth − ψ</code></div>
+  <div class="step"><span class="num n2">6</span> Average across all visible markers (circular mean), reduce covariance by √N</div>
+  <div class="step"><span class="num n2">7</span> Publish <code>/aruco/attitude</code> (PoseWithCovarianceStamped, yaw-valid only)</div>
+
+  <h3>Config: aruco_attitude.yaml</h3>
+  <pre><code>aruco_attitude:
+  ros__parameters:
+    marker_frame: zed_camera_link
+    base_frame: base_link
+    yaw_stddev: 4.0       # deg — wall tilt + detection noise
+    markers:
+      - id: 0
+        azimuth: 90.0     # deg — compass heading wall faces
+      - id: 1
+        azimuth: 180.0
+      - id: 42
+        azimuth: 270.0</code></pre>
+
+  <h3>New Package: src/aruco_attitude/</h3>
+  <div class="file-tree">
+  <span class="dir">src/aruco_attitude/</span>                <span class="tag tag-s2">SECTION 2</span>
+  ├── <span>package.xml</span>                     <span class="tag tag-next">TODO</span>
+  ├── <span>setup.py</span>                         <span class="tag tag-next">TODO</span>
+  ├── <span>resource/aruco_attitude</span>          <span class="tag tag-next">TODO</span>
+  ├── <span>config/aruco_attitude.yaml</span>       <span class="tag tag-next">TODO</span>
+  ├── <span>aruco_attitude/__init__.py</span>       <span class="tag tag-next">TODO</span>
+  ├── <span>aruco_attitude/attitude_node.py</span>   <span class="tag tag-next">TODO</span>
+  └── <span>launch/attitude.launch.py</span>         <span class="tag tag-next">TODO</span>
+  </div>
+</div>
+
+<h3 id="s2-fusion">Sensor Fusion with robot_localization EKF</h3>
+
+<div class="card s2">
+  <p>The EKF fuses all three sensor sources — no AMCL needed for this attitude layer:</p>
+
+  <pre><code>ekf_filter_node:
+  odom0: /odom            # wheel odometry
+  odom0_config: [true, true, false, false, false, false,
+                 false, false, false, false, false, false,
+                 true, true, true]   # x, y, vx, vy, vw
+
+  imu0: /zed/zed_node/imu/data
+  imu0_config: [false, false, false, true, true, false,
+                false, false, false, false, false, false,
+                false, false, false]  # roll, pitch only
+
+  pose0: /aruco/attitude
+  pose0_config: [false, false, false, false, false, true,
+                 false, false, false, false, false, false,
+                 false, false, false]  # yaw only
+
+  map_frame: map
+  odom_frame: odom
+  world_frame: odom
+  two_d_mode: false</code></pre>
+</div>
+
+<!-- ======================================================================== -->
+<!--  SECTION 3: OBJECTIVES TO REACH                                           -->
+<!-- ======================================================================== -->
+<h2 id="s3" class="section3">Section 3 — ArUco Markers as Objectives to Reach</h2>
+
+<h3 id="s3-overview">Concept</h3>
+
+<p>Instead of navigating to absolute (x, y) coordinates in the map, the robot navigates <strong>toward a detected ArUco marker</strong>. This enables:</p>
+
+<div class="grid">
+  <div class="card s3">
+    <h3>Marker-Based Waypoints</h3>
+    <p>Send the robot to a waypoint defined by "go to marker 42 and stop when within 0.5m". The marker defines the goal position, not a fixed coordinate.</p>
+    <p><strong>Use case:</strong> Missions where markers are placed at key locations (doors, inspection points, delivery zones).</p>
+  </div>
+  <div class="card s3">
+    <h3>Precision Docking</h3>
+    <p>Nav2 navigates to a staging pose near the dock. Then vision-based final approach using the ArUco marker for cm-level precision.</p>
+    <p><strong>Use case:</strong> Autonomous charging, tool docking, payload pickup.</p>
+  </div>
+  <div class="card s3">
+    <h3>Search &amp; Find</h3>
+    <p>If the marker is not visible, the robot executes a search pattern (rotate, drive in expanding circles) until the target marker is found.</p>
+    <p><strong>Use case:</strong> Lost marker recovery, exploring unknown structured environments.</p>
+  </div>
+</div>
+
+<h3 id="s3-bt-nodes">Nav2 BT Plugins (C++)</h3>
+
+<p>Custom Behavior Tree nodes compile as <code>pluginlib</code> plugins and register into Nav2's BT navigator.</p>
+
+<div class="grid">
+  <div class="card s3">
+    <h3><code>ArucoMarkerVisible</code> <span class="tag tag-cpp">C++</span></h3>
+    <p>BT <strong>condition node</strong>. Checks if a specific marker ID is present in the latest <code>/aruco/markers</code> message.</p>
+    <pre><code>class ArucoMarkerVisible : public BtConditionNode {
+  // subscribes to /aruco/markers
+  // returns SUCCESS if marker_id in frame
+  // returns FAILURE if not visible
+};</code></pre>
+    <p><strong>BT XML usage:</strong></p>
+    <pre><code>&lt;ArucoMarkerVisible marker_id="42"/&gt;</code></pre>
+  </div>
+  <div class="card s3">
+    <h3><code>NavigateToMarker</code> <span class="tag tag-cpp">C++</span></h3>
+    <p>BT <strong>action node</strong>. Computes a goal pose from the detected marker and sends it to Nav2's navigate-to-pose pipeline.</p>
+    <pre><code>class NavigateToMarker : public BtActionNode {
+  // 1. Get latest marker pose from /aruco/markers
+  // 2. Transform to map frame via TF
+  // 3. Compute approach offset (e.g., 0.8m in front)
+  // 4. Send goal to NavigateToPose
+  // 5. Wait for completion
+};</code></pre>
+    <p><strong>BT XML usage:</strong></p>
+    <pre><code>&lt;NavigateToMarker marker_id="42" approach_distance="0.8"/&gt;</code></pre>
+  </div>
+</div>
+
+<h3 id="s3-behaviors">Behavior Server Plugin</h3>
+
+<div class="card s3">
+  <h3><code>SearchMarker</code> <span class="tag tag-cpp">C++</span></h3>
+  <p>Registers as a Nav2 behavior plugin (alongside Spin, Backup, DriveOnHeading, Wait). Executes a search pattern until the target marker is detected.</p>
+
+  <pre><code>class SearchMarker : public Behavior {
+  // 1. Rotate in place (configurable speed)
+  // 2. If not found after full rotation, move forward
+  // 3. Repeat expanding search pattern
+  // 4. SUCCESS when marker detected
+  // 5. FAILURE on timeout
+};</code></pre>
+
+  <p><strong>Config addition to nav2_params_rover.yaml:</strong></p>
+  <pre><code>behavior_server:
+  behavior_plugins: [spin, backup, drive_on_heading, wait, search_marker]
+  search_marker:
+    plugin: aruco_nav2_plugins/SearchMarker
+    marker_id: 42
+    search_timeout: 30.0
+    rotate_speed: 0.3
+    search_radius_step: 0.5</code></pre>
+</div>
+
+<h3 id="s3-waypoints">Waypoint Task Executor Plugin</h3>
+
+<div class="card s3">
+  <p>Extends Nav2's waypoint follower. Each waypoint can require marker detection as a completion condition.</p>
+
+  <pre><code>class ArucoWaypointTask : public WaypointTaskExecutor {
+  // At each waypoint:
+  // 1. Wait for required_marker_id to appear
+  // 2. Optionally refine pose relative to marker
+  // 3. Mark task complete
+};</code></pre>
+
+  <p><strong>Config addition:</strong></p>
+  <pre><code>waypoint_follower:
+  waypoint_task_executor_plugin: aruco_waypoint_task
+  aruco_waypoint_task:
+    plugin: aruco_nav2_plugins::ArucoWaypointTask
+    search_timeout: 30.0
+    stop_on_marker_miss: false</code></pre>
+
+  <p><strong>Waypoint mission format:</strong></p>
+  <pre><code>waypoints:
+  - pose: [1.0, 0.5, 0.0, 0.0, 0.0, 0.0]
+    required_marker: 0       # must see marker 0 here
+  - pose: [3.0, -1.0, 0.0, 0.0, 0.0, 1.57]
+    required_marker: 1       # must see marker 1 here</code></pre>
+</div>
+
+<h3 id="s3-docking">Precision Docking</h3>
+
+<div class="card s3">
+  <p>Two approaches for vision-based final approach to a dock marked with an ArUco tag:</p>
+
+  <div class="grid">
+    <div class="step" style="margin:0;">
+      <span class="num n3">A</span> <strong>Custom <code>ArucoDock</code> BT Action</strong>
+      <pre><code>class ArucoDock : public BtActionNode {
+  // 1. Align to marker (lateral/angular PID)
+  // 2. Approach at reduced speed (0.08 m/s)
+  // 3. Stop on distance threshold or contact
+};</code></pre>
+    </div>
+    <div class="step" style="margin:0;">
+      <span class="num n3">B</span> <strong>opennav_docking integration</strong>
+      <pre><code>SimpleChargingDock plugin:
+  detect_dock_pose_topic: /aruco/detected_dock_pose
+
+Bridge node converts:
+  /aruco/markers → /detected_dock_pose
+
+Existing BT nodes:
+  DockRobot / UndockRobot</code></pre>
+    </div>
+  </div>
+
+  <p><strong>Complete dock mission BT XML:</strong></p>
+  <pre><code>&lt;root main_tree_to_execute="DockMission"&gt;
+  &lt;BehaviorTree id="DockMission"&gt;
+    &lt;PipelineSequence&gt;
+      &lt;NavigateToMarker marker_id="0" approach_distance="1.5"/&gt;
+      &lt;ArucoMarkerVisible marker_id="0"/&gt;
+      &lt;ArucoDock marker_id="0"/&gt;
+    &lt;/PipelineSequence&gt;
+  &lt;/BehaviorTree&gt;
+&lt;/root&gt;</code></pre>
+</div>
+
+<h3>C++ Plugin Package: src/aruco_nav2_plugins/</h3>
+
+<div class="file-tree">
+<span class="dir">src/aruco_nav2_plugins/</span>             <span class="tag tag-s3">SECTION 3</span>
+├── <span>package.xml</span>                     <span class="tag tag-future">TODO</span>
+├── <span>CMakeLists.txt</span>                  <span class="tag tag-future">TODO</span>
+├── <span>src/aruco_marker_visible_condition.cpp</span> <span class="tag tag-future">TODO</span>
+├── <span>src/navigate_to_marker_action.cpp</span>       <span class="tag tag-future">TODO</span>
+├── <span>src/aruco_dock_action.cpp</span>              <span class="tag tag-future">TODO</span>
+├── <span>src/aruco_search_behavior.cpp</span>          <span class="tag tag-future">TODO</span>
+├── <span>src/aruco_waypoint_task.cpp</span>            <span class="tag tag-future">TODO</span>
+├── <span>aruco_bt_plugins.xml</span>        <span class="tag tag-future">TODO</span>
+├── <span>aruco_behavior_plugins.xml</span>   <span class="tag tag-future">TODO</span>
+└── <span>aruco_waypoint_plugins.xml</span>   <span class="tag tag-future">TODO</span>
+</div>
+
+<!-- ======================================================================== -->
+<!--  REFERENCE                                                                -->
+<!-- ======================================================================== -->
+<h2 id="ref" class="ref">Reference</h2>
+
+<h3>Build &amp; Deploy</h3>
+
+<div class="grid">
+  <div class="card">
+    <h3>Development (this Mac)</h3>
+    <pre><code>source ~/Documents/Polispace/ros2_humble/local_setup.zsh
+export CMAKE_PREFIX_PATH="/Users/giuliomastromartino/micromamba:$CMAKE_PREFIX_PATH"
+cd ~/Documents/Polispace/Nav2
+
+# Python packages
+colcon build --symlink-install --packages-select aruco_detection_dev
+source install/local_setup.zsh
+export ROS_LOCALHOST_ONLY=1
+
+# Test
+detection_node
+</code></pre>
+  </div>
+  <div class="card">
+    <h3>Deployment (Jetson)</h3>
+    <pre><code>cd ~/nav2_ws
+source /opt/ros/humble/setup.bash
+rosdep install --from-paths src -y --ignore-src
+colcon build --symlink-install
+source install/local_setup.bash
+
+# Production launch
+ros2 launch my_robot_bringup nav2_navigation.launch.py \
+  map:=$HOME/nav2_ws/maps/rover_real_map.yaml
+</code></pre>
+  </div>
+</div>
+
+<h3>Known macOS Issues</h3>
+
+<table>
+  <tr><th>Issue</th><th>Workaround</th></tr>
+  <tr><td>Multicast blocked</td><td><code>export ROS_LOCALHOST_ONLY=1</code></td></tr>
+  <tr><td>DDS daemon stale state</td><td><code>ros2 daemon stop</code> then <code>--no-daemon</code></td></tr>
+  <tr><td>Camera permission</td><td>Settings → Privacy → Camera → allow Terminal</td></tr>
+  <tr><td>iPhone Continuity Camera conflict</td><td>Disable in FaceTime settings</td></tr>
+  <tr><td>FFMPEG backend fails</td><td>Node auto-selects <code>CAP_AVFOUNDATION</code></td></tr>
+  <tr><td><code>--symlink-install</code> error</td><td>Build without for initial install</td></tr>
+</table>
+
+<h3>Test Markers</h3>
+
+<table>
+  <tr><th>File</th><th>Dictionary</th><th>ID</th><th>Self-Test</th></tr>
+  <tr><td><code>/tmp/aruco_6x6x250_42.png</code></td><td>DICT_6X6_250</td><td>42</td><td>&#10003;</td></tr>
+  <tr><td><code>/tmp/aruco_7x7x250_42.png</code></td><td>DICT_7X7_250</td><td>42</td><td>&#10003;</td></tr>
+  <tr><td><code>/tmp/aruco_7x7x250_17.png</code></td><td>DICT_7X7_250</td><td>17</td><td>&#10003;</td></tr>
+  <tr><td><code>/tmp/aruco_5x5x250_23.png</code></td><td>DICT_5X5_250</td><td>23</td><td>&#10003;</td></tr>
+</table>
+
+<h3>File Inventory</h3>
+
+<table>
+  <tr><th>File</th><th>Section</th><th>Status</th></tr>
+  <tr><td><code>src/aruco_detection_dev/</code> (6 files)</td><td><span class="tag tag-s1">1</span></td><td>&#10003; Done</td></tr>
+  <tr><td><code>src/aruco_detection/</code> (7 files)</td><td><span class="tag tag-s2">2</span></td><td>&#10003; Done</td></tr>
+  <tr><td><code>src/aruco_attitude/</code> (7 files)</td><td><span class="tag tag-s2">2</span></td><td style="color:var(--orange)">Pending</td></tr>
+  <tr><td><code>src/aruco_nav2_plugins/</code> (10 files)</td><td><span class="tag tag-s3">3</span></td><td style="color:var(--border)">Future</td></tr>
+  <tr><td><code>my_robot_bringup/launch/my_robot.launch.py</code></td><td><span class="tag tag-s2">2</span></td><td style="color:var(--orange)">Pending edit (Phase 2B)</td></tr>
+  <tr><td><code>my_robot_bringup/package.xml</code></td><td><span class="tag tag-s2">2</span></td><td style="color:var(--orange)">Pending edit (Phase 2B)</td></tr>
+  <tr><td><code>my_robot_bringup/config/ekf_params.yaml</code></td><td><span class="tag tag-s2">2</span></td><td style="color:var(--orange)">Pending</td></tr>
+  <tr><td><code>my_robot_bringup/config/nav2_params_rover.yaml</code></td><td><span class="tag tag-s3">3</span></td><td style="color:var(--border)">Future edit</td></tr>
+  <tr><td><code>Aruco_mapping.html</code></td><td>—</td><td>&#10003; This document</td></tr>
+  <tr><td><code>README.md</code></td><td>—</td><td>&#10003; Workspace README</td></tr>
+</table>
+
+<h3>Dependencies</h3>
+
+<table>
+  <tr><th>Package</th><th>Section</th><th>Status</th></tr>
+  <tr><td><code>ros-humble-nav2-behavior-tree</code></td><td><span class="tag tag-s3">3</span></td><td>&#10003; Installed</td></tr>
+  <tr><td><code>ros-humble-nav2-msgs</code></td><td><span class="tag tag-s3">3</span></td><td>&#10003; Installed</td></tr>
+  <tr><td><code>ros-humble-nav2-core</code></td><td><span class="tag tag-s3">3</span></td><td>&#10003; Installed</td></tr>
+  <tr><td><code>ros-humble-nav2-behaviors</code></td><td><span class="tag tag-s3">3</span></td><td>&#10003; Installed</td></tr>
+  <tr><td><code>ros-humble-nav2-waypoint-follower</code></td><td><span class="tag tag-s3">3</span></td><td>&#10003; Installed</td></tr>
+  <tr><td><code>ros-humble-cv-bridge</code></td><td><span class="tag tag-s1">1</span> + <span class="tag tag-s2">2</span></td><td>&#10003; Available</td></tr>
+  <tr><td><code>ros-humble-image-transport</code></td><td><span class="tag tag-s2">2</span></td><td>&#10003; Available</td></tr>
+  <tr><td><code>ros-humble-robot-localization</code></td><td><span class="tag tag-s2">2</span></td><td>&#10003; Available</td></tr>
+  <tr><td><code>ros-humble-zed-wrapper</code></td><td><span class="tag tag-s2">2</span></td><td style="color:var(--orange)">Jetson only</td></tr>
+  <tr><td><code>opennav-docking</code></td><td><span class="tag tag-s3">3</span></td><td style="color:var(--border)">Future</td></tr>
+</table>
+
+<div style="margin-top: 3rem; padding: 1rem; border-top: 1px solid var(--border); text-align: center; opacity: 0.6; font-size: 0.85rem;">
+  RoverTech Nav2 &middot; ROS 2 Humble &middot; macOS development → Jetson deployment
+</div>
+
+</body>
+</html>

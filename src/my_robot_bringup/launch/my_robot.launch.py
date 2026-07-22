@@ -84,6 +84,14 @@ def generate_launch_description():
         }.items()
     )
 
+    aruco_detection_node = Node(
+        package="aruco_detection",
+        executable="detection_node",
+        name="aruco_detection_node",
+        output="screen",
+        parameters=[os.path.join(get_package_share_directory("aruco_detection"), "config", "zed_params.yaml")],
+    )
+
     return LaunchDescription([
         use_rviz_arg,
         robot_state_publisher_node,
@@ -92,5 +100,6 @@ def generate_launch_description():
         joint_state_publisher_gui_node,
         diff_drive_controller_spawner,
         rviz2_node,
-        zed_launch
+        zed_launch,
+        aruco_detection_node,
     ])

@@ -1,0 +1,5 @@
+Metadata-Version: 2.4
+Name: aruco_detection_dev
+Version: 0.1.0
+Requires-Dist: setuptools
+Dynamic: requires-dist
