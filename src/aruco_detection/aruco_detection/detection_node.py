@@ -8,6 +8,8 @@ from std_msgs.msg import Int32MultiArray
 from cv_bridge import CvBridge, CvBridgeError
 import math
 
+_OPENCV_NEW_API = hasattr(cv2.aruco, "ArucoDetector")
+
 
 _ARUCO_DICT = {
     "DICT_4X4_50": cv2.aruco.DICT_4X4_50,
@@ -72,14 +74,21 @@ class ArucoDetectionNode(Node):
                 continue
             did = _ARUCO_DICT[name]
             d = cv2.aruco.getPredefinedDictionary(did)
-            p = cv2.aruco.DetectorParameters()
-            active.append((name, cv2.aruco.ArucoDetector(d, p)))
+            if _OPENCV_NEW_API:
+                p = cv2.aruco.DetectorParameters()
+                active.append((name, cv2.aruco.ArucoDetector(d, p)))
+            else:
+                p = cv2.aruco.DetectorParameters_create()
+                active.append((name, (d, p)))
             self.get_logger().info(f"  Loaded dictionary: {name}")
 
         if not active:
             self.get_logger().error("No valid dictionaries configured, using DICT_6X6_250")
             d = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_6X6_250)
-            active.append(("DICT_6X6_250", cv2.aruco.ArucoDetector(d, cv2.aruco.DetectorParameters())))
+            if _OPENCV_NEW_API:
+                active.append(("DICT_6X6_250", cv2.aruco.ArucoDetector(d, cv2.aruco.DetectorParameters())))
+            else:
+                active.append(("DICT_6X6_250", (d, cv2.aruco.DetectorParameters_create())))
 
         self._detectors = active
         self._marker_size = marker_size
@@ -143,7 +152,11 @@ class ArucoDetectionNode(Node):
         all_src = []
 
         for dict_name, detector in self._detectors:
-            corners, ids, _ = detector.detectMarkers(gray)
+            if _OPENCV_NEW_API:
+                corners, ids, _ = detector.detectMarkers(gray)
+            else:
+                d, p = detector
+                corners, ids, _ = cv2.aruco.detectMarkers(gray, d, parameters=p)
             if ids is not None and len(ids) > 0:
                 all_corners.extend(corners)
                 all_ids.append(ids.flatten())
@@ -183,7 +196,7 @@ class ArucoDetectionNode(Node):
                 msg_out.poses.append(pose)
 
         self._pub.publish(msg_out)
-        if all_ids.size > 0:
+        if len(all_ids) > 0:
             id_msg = Int32MultiArray()
             id_msg.data = all_ids.tolist()
             self._id_pub.publish(id_msg)

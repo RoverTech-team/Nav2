@@ -6,4 +6,4 @@ aruco_detection:
     aruco_dictionaries: ["DICT_6X6_250", "DICT_7X7_250"]
     marker_frame: zed_camera_link
     publish_rate: 10.0
-    publish_debug_image: false
+    publish_debug_image: true

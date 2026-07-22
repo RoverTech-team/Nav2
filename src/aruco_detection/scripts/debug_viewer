@@ -1,0 +1,3 @@
+#!/usr/bin/env python3
+from aruco_detection.debug_viewer_node import main
+main()
