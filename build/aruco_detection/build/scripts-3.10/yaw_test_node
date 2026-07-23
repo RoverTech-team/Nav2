@@ -1,0 +1,3 @@
+#!/usr/bin/python3
+from aruco_detection.yaw_test_node import main
+main()
