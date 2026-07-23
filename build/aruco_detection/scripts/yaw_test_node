@@ -1,3 +1,1 @@
-#!/usr/bin/env python3
-from aruco_detection.yaw_test_node import main
-main()
+/home/RoverTech/nav2_ws_new/src/aruco_detection/scripts/yaw_test_node

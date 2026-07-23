@@ -1,0 +1,3 @@
+#!/usr/bin/env python3
+from aruco_detection.attitude_node import main
+main()

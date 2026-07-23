@@ -1,0 +1,1 @@
+/home/RoverTech/nav2_ws_new/build/ethercat_driver_ros2/ament_cmake_core/ethercat_driver_ros2Config-version.cmake

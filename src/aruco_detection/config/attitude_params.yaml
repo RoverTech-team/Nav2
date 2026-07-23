@@ -1,0 +1,15 @@
+aruco_attitude_node:
+  ros__parameters:
+    marker_frame: zed_camera_link
+    base_frame: base_footprint
+    yaw_threshold: 10.0
+    jump_threshold: 15.0
+    loss_timeout: 0.5
+    temporal_window: 20
+    min_yaw_stddev: 0.5
+    max_yaw_stddev: 20.0
+    hz: 20.0
+    queue_size: 10
+    valid_marker_ids: [0, 1, 42]
+    pointcloud_rate_map: '{"0": 10.0, "1": 10.0, "2": 7.0, "3": 5.0, "4": 3.0}'
+    pointcloud_update_interval: 3.0

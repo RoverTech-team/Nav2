@@ -1,0 +1,766 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Phase 2b — Detailed Implementation Spec</title>
+<style>
+  :root {
+    --bg: #0d1117; --card: #161b22; --border: #30363d;
+    --text: #c9d1d9; --heading: #f0f6fc; --accent: #58a6ff;
+    --green: #3fb950; --orange: #d29922; --red: #f85149;
+    --code-bg: #1c2128;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg); color: var(--text); line-height: 1.6;
+    padding: 2rem; max-width: 960px; margin: 0 auto;
+  }
+  h1 { color: var(--heading); font-size: 1.7rem; margin-bottom: 0.25rem; }
+  h1 small { display: block; font-size: 0.85rem; font-weight: 400; opacity: 0.6; margin-top: 0.25rem; }
+  h2 { color: var(--heading); font-size: 1.3rem; margin: 1.5rem 0 0.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; }
+  h3 { color: var(--accent); font-size: 1.05rem; margin: 1.25rem 0 0.4rem; }
+  h4 { color: var(--heading); font-size: 0.95rem; margin: 0.75rem 0 0.3rem; }
+  p, li { margin-bottom: 0.4rem; }
+  ul, ol { padding-left: 1.5rem; }
+  code {
+    background: var(--code-bg); border: 1px solid var(--border);
+    padding: 0.15em 0.4em; border-radius: 4px; font-size: 0.9em;
+    font-family: 'SF Mono', monospace; color: var(--green);
+  }
+  pre {
+    background: var(--code-bg); border: 1px solid var(--border);
+    border-radius: 6px; padding: 0.8rem; overflow-x: auto;
+    margin: 0.5rem 0; font-size: 0.8rem;
+    font-family: 'SF Mono', monospace;
+  }
+  pre code { background: none; border: none; padding: 0; color: inherit; }
+  .card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 8px; padding: 1.25rem; margin: 1rem 0;
+  }
+  .card.pending { border-left: 4px solid var(--orange); }
+  .card.info { border-left: 4px solid var(--accent); }
+  .card.done { border-left: 4px solid var(--green); }
+  .card.danger { border-left: 4px solid var(--red); }
+  .diagram {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 8px; padding: 1.5rem; margin: 1rem 0;
+    font-family: 'SF Mono', monospace; font-size: 0.75rem;
+    line-height: 1.5; white-space: pre; overflow-x: auto;
+  }
+  table { width: 100%; border-collapse: collapse; margin: 0.5rem 0; font-size: 0.9rem; }
+  th, td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border); }
+  th { color: var(--heading); font-weight: 600; }
+  .tag {
+    display: inline-block; font-size: 0.7rem; font-weight: 600;
+    padding: 0.15em 0.5em; border-radius: 3px; vertical-align: middle;
+  }
+  .tag-done { background: #1b3a1d; color: var(--green); }
+  .tag-todo { background: #3d2e00; color: var(--orange); }
+  .meta { opacity: 0.5; font-size: 0.8rem; margin-top: 2rem; border-top: 1px solid var(--border); padding-top: 1rem; }
+  .file-path { font-family: 'SF Mono', monospace; font-size: 0.85rem; color: var(--accent); margin: 0.5rem 0; }
+  .diff-add { background: rgba(63,185,80,0.15); color: var(--green); }
+  .diff-rem { background: rgba(248,81,73,0.15); color: var(--red); }
+  .diff-line { padding: 0.1em 0.5em; border-radius: 2px; font-family: 'SF Mono', monospace; font-size: 0.85rem; display: inline-block; white-space: pre; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0; }
+  @media (max-width: 700px) { .grid { grid-template-columns: 1fr; } }
+  .step { margin: 0.5rem 0; padding: 0.5rem; background: var(--code-bg); border-radius: 6px; border: 1px solid var(--border); font-size: 0.9rem; }
+  .step .num { display: inline-block; width: 1.5rem; height: 1.5rem; line-height: 1.5rem; text-align: center; border-radius: 50%; margin-right: 0.5rem; font-size: 0.8rem; font-weight: 700; background: var(--orange); color: var(--bg); }
+</style>
+</head>
+<body>
+
+<h1>Phase 2b — Detailed Implementation Spec <small>EKF Sensor Fusion + Visual Yaw Correction</small></h1>
+
+<div class="card info">
+  <strong>Status:</strong> Approved for implementation &nbsp;|&nbsp;
+  <strong>ROS 2:</strong> Humble &nbsp;|&nbsp;
+  <strong>Robot:</strong> Skid-steer rover, ZED 2i camera, diff_drive controller &nbsp;|&nbsp;
+  <strong>Date:</strong> 2026-07-24
+</div>
+
+<h2>Resolved Open Questions</h2>
+
+<div class="card done">
+  <table>
+    <tr><th>#</th><th>Question</th><th>Decision</th></tr>
+    <tr><td>1</td><td>Which controller config gets <code>enable_odom_tf: false</code>?</td><td><code>my_robot_controller.yaml</code> (the active config)</td></tr>
+    <tr><td>2</td><td>Where does <code>ekf_params.yaml</code> live?</td><td><code>src/my_robot_bringup/config/ekf_params.yaml</code></td></tr>
+    <tr><td>3</td><td>How does yaw_correction integrate into bringup?</td><td>Included in <code>nav2_navigation.launch.py</code> only (not mapping)</td></tr>
+    <tr><td>4</td><td>Does <code>controller_server</code> need <code>odom_topic</code>?</td><td>Yes — add <code>odom_topic: /odometry/filtered</code></td></tr>
+    <tr><td>5</td><td>Which package gets <code>robot_localization</code> dependency?</td><td><code>my_robot_bringup</code></td></tr>
+    <tr><td>6</td><td>Startup yaw for attitude node?</td><td>Zero — attitude node initializes with yaw=0, no EKF dependency at startup</td></tr>
+    <tr><td>7</td><td><code>odom0_differential</code></td><td><code>true</code> — ros2_control is open-loop, wheel odom x/y drifts; EKF uses only velocity deltas</td></tr>
+    <tr><td>8</td><td>PoseWithCovarianceStamped.frame_id?</td><td><code>"odom"</code> — must match EKF <code>world_frame</code>; not base_footprint</td></tr>
+    <tr><td>9</td><td><code>detection_node</code> not in nav launch?</td><td>Must be added — attitude_node subscribes to its /aruco/markers topic</td></tr>
+    <tr><td>10</td><td>ZED grab resolution?</td><td><strong>HD2K</strong> — needed for far ArUco detection. Override via <code>zed_override.yaml</code></td></tr>
+    <tr><td>11</td><td>Point cloud resolution/frequency?</td><td><strong>REDUCED at 10 Hz</strong> — keeps data rate near current levels (1.7M vs 6.9M pts/sec)</td></tr>
+    <tr><td>12</td><td>Adaptive publish rate by resolution?</td><td>Yes — detection_node: 2K→5Hz, 1080→10Hz, 720→15Hz, VGA→20Hz</td></tr>
+    <tr><td>13</td><td>Failure forget timeout for adaptive step-up?</td><td>10 s — after timeout, clear <code>_failed_res_idx</code> and retry higher resolution</td></tr>
+    <tr><td>14</td><td>Dynamic point cloud frequency from attitude_node?</td><td>Yes — attitude_node subscribes to <code>/aruco/detection_status</code>, calls <code>set_parameters</code> on ZED node every 3 s</td></tr>
+    <tr><td>15</td><td><code>zed_override.yaml</code> passed to ZED wrapper?</td><td>In <code>my_robot.launch.py</code> via <code>ros_params_override_path</code></td></tr>
+  </table>
+</div>
+
+<h2>Architecture Overview</h2>
+
+<div class="diagram">
+  AFTER (Phase 2b)
+
+  ┌──────────────────────────────────────────────────────┐
+  │  my_robot.launch.py                                  │
+  │  ┌──────────────────────────────────────────────┐    │
+  │  │  RSP, ros2_control, ZED wrapper (HD2K)       │    │
+  │  │  diff_drive controller (enable_odom_tf: f)   │    │
+  │  └──────────────────────────────────────────────┘    │
+  └────────────┬─────────────────────────────────────────┘
+               │
+  ┌────────────▼─────────────────────────────────────────┐
+  │  nav2_navigation.launch.py                            │
+  │                                                        │
+  │  1. pointcloud_to_laserscan (ZED pointcloud ─► scan)  │
+  │  2. cmd_vel_relay                                      │
+  │  3. detection_node (ArUco markers from HD2K RGB)       │
+  │     └─ /aruco/markers  /aruco/marker_ids               │
+  │       └─ /aruco/detection_status (adaptive_mode)       │
+  │  4. attitude_node                                      │
+  │     ├─ /aruco/markers ──► /aruco/attitude             │
+  │     └─ /aruco/detection_status ──► set ZED depth rate │
+  │  5. robot_localization EKF                             │
+  │     fuses: diff_drive + ZED IMU + ArUco yaw            │
+  │     publishes: /odometry/filtered                      │
+  │               odom→base_footprint TF                    │
+  │  6. Nav2 bringup (consumes /odometry/filtered)          │
+  └─────────────────────────────────────────────────────────┘
+
+  ARROW SUMMARY:
+    ZED wrapper ──(/zed/.../image)──► detection_node ──(/aruco/markers)──► attitude_node ──(/aruco/attitude)──► EKF
+    ZED wrapper ──(/zed/.../imu)────────────────────────────────────────────────────────────────────────────► EKF
+    ZED wrapper ──(/diff_drive/odom)────────────────────────────────────────────────────────────────────────► EKF
+    attitude_node ──(set_parameters point_cloud_freq)──► ZED wrapper (closed loop)
+</div>
+
+<h2>File Change Summary</h2>
+
+<table>
+  <tr><th>#</th><th>File</th><th>Action</th><th>Status</th></tr>
+  <tr><td>1</td><td><code>src/aruco_detection/aruco_detection/attitude_node.py</code></td><td>CREATE</td><td class="tag tag-todo">TODO</td></tr>
+  <tr><td>2</td><td><code>src/aruco_detection/config/attitude_params.yaml</code></td><td>CREATE</td><td class="tag tag-todo">TODO</td></tr>
+  <tr><td>3</td><td><code>src/aruco_detection/scripts/attitude_node</code></td><td>CREATE</td><td class="tag tag-todo">TODO</td></tr>
+  <tr><td>4</td><td><code>src/aruco_detection/setup.py</code></td><td>EDIT</td><td class="tag tag-todo">TODO</td></tr>
+  <tr><td>5</td><td><code>src/aruco_detection/launch/yaw_correction.launch.py</code></td><td>CREATE</td><td class="tag tag-todo">TODO</td></tr>
+  <tr><td>6</td><td><code>src/my_robot_bringup/config/ekf_params.yaml</code></td><td>CREATE</td><td class="tag tag-todo">TODO</td></tr>
+  <tr><td>7</td><td><code>src/my_robot_bringup/config/my_robot_controller.yaml</code></td><td>EDIT</td><td class="tag tag-todo">TODO</td></tr>
+  <tr><td>8</td><td><code>src/my_robot_bringup/config/nav2_params_rover.yaml</code></td><td>EDIT</td><td class="tag tag-todo">TODO</td></tr>
+  <tr><td>9</td><td><code>src/my_robot_bringup/package.xml</code></td><td>EDIT</td><td class="tag tag-todo">TODO</td></tr>
+  <tr><td>10</td><td><code>src/my_robot_bringup/launch/nav2_navigation.launch.py</code></td><td>EDIT</td><td class="tag tag-todo">TODO</td></tr>
+  <tr><td>11</td><td><code>src/aruco_detection/config/zed_override.yaml</code></td><td>EDIT — add depth section</td><td class="tag tag-todo">TODO</td></tr>
+  <tr><td>12</td><td><code>src/aruco_detection/config/zed_params.yaml</code></td><td>EDIT — add adaptive rate params</td><td class="tag tag-todo">TODO</td></tr>
+  <tr><td>13</td><td><code>src/aruco_detection/aruco_detection/detection_node.py</code></td><td>EDIT — adaptive rate + failure forget</td><td class="tag tag-todo">TODO</td></tr>
+  <tr><td>14</td><td><code>src/my_robot_bringup/launch/my_robot.launch.py</code></td><td>EDIT — add ros_params_override_path</td><td class="tag tag-todo">TODO</td></tr>
+</table>
+
+<hr>
+
+<h2>1. attitude_node.py — CREATE</h2>
+
+<p class="file-path">src/aruco_detection/aruco_detection/attitude_node.py</p>
+
+<div class="card pending">
+  <h3>Design</h3>
+  <p>A ROS 2 Python node that computes differential yaw from wall-mounted ArUco markers. Unlike <code>yaw_test_node.py</code>, it does <strong>not</strong> require a priori wall azimuths — it tracks relative yaw changes via a latching mechanism.</p>
+
+  <p>Additionally, it acts as a <strong>ZED point cloud rate relay</strong> — subscribing to the detection_node's adaptive mode status and adjusting the ZED wrapper's <code>depth.point_cloud_freq</code> parameter to save bandwidth when the robot is close to markers.</p>
+
+  <h3>Subscriptions</h3>
+  <table>
+    <tr><th>Topic</th><th>Type</th><th>Purpose</th></tr>
+    <tr><td><code>/aruco/markers</code></td><td><code>PoseArray</code></td><td>Marker poses from detection_node</td></tr>
+    <tr><td><code>/aruco/marker_ids</code></td><td><code>Int32MultiArray</code></td><td>Marker ID list (aligned with poses)</td></tr>
+    <tr><td><code>/aruco/detection_status</code></td><td><code>Float64MultiArray</code></td><td>Adaptive mode (data[2]) for point cloud rate control</td></tr>
+  </table>
+
+  <h3>Publications</h3>
+  <table>
+    <tr><th>Topic</th><th>Type</th><th>Purpose</th></tr>
+    <tr><td><code>/aruco/attitude</code></td><td><code>PoseWithCovarianceStamped</code></td><td>Yaw estimate with dynamic covariance (pose.x/y/z = 0, orientation = yaw-only quaternion, <strong>frame_id: odom</strong>)</td></tr>
+  </table>
+
+  <h3>Services Called</h3>
+  <table>
+    <tr><th>Service</th><th>Type</th><th>Purpose</th></tr>
+    <tr><td><code>/zed/zed_node/set_parameters</code></td><td><code>rcl_interfaces/SetParameters</code></td><td>Set <code>depth.point_cloud_freq</code> based on current adaptive mode</td></tr>
+  </table>
+
+  <h3>Data Flow — Yaw Estimation</h3>
+  <div class="step"><span class="num">1</span> Receive marker poses + IDs</div>
+  <div class="step"><span class="num">2</span> Look up <code>zed_camera_link → base_footprint</code> TF (cached, identity fallback on failure — same pattern as yaw_test_node)</div>
+  <div class="step"><span class="num">3</span> For each valid marker ID: rvec → wall normal → transform to base_footprint → <code>psi = atan2(normal.y, normal.x)</code></div>
+  <div class="step"><span class="num">4</span> Inter-marker check: reject frame if max pairwise |psi_i - psi_j| > <code>yaw_threshold</code></div>
+  <div class="step"><span class="num">5</span> <strong>Latch logic:</strong> if not latched (first valid detection OR loss > <code>loss_timeout</code>):<br>
+    &nbsp;&nbsp;<code>psi_ref = circular_mean(all psi)</code><br>
+    &nbsp;&nbsp;<code>yaw_ref = 0.0</code> (absolute yaw is irrelevant)<br>
+    &nbsp;&nbsp;Set latched = True</div>
+  <div class="step"><span class="num">6</span> <strong>Differential yaw:</strong><br>
+    &nbsp;&nbsp;<code>psi_mean = circular_mean(all psi)</code><br>
+    &nbsp;&nbsp;<code>yaw_obs = yaw_ref + circular_delta(psi_mean - psi_ref)</code><br>
+    &nbsp;&nbsp;(circular_delta normalizes to [-180, 180))</div>
+  <div class="step"><span class="num">7</span> Jump rejection: skip if |yaw_obs - last_published| > <code>jump_threshold</code></div>
+  <div class="step"><span class="num">8</span> Dynamic covariance: rolling window of last N accepted yaws → stddev → clamp(min_cov, max_cov) → set covariance[35] (yaw-yaw cell)</div>
+  <div class="step"><span class="num">9</span> Publish <code>/aruco/attitude</code> as PoseWithCovarianceStamped (zero translation, yaw-only quaternion, <strong>header.frame_id = "odom"</strong> — EKF world_frame)</div>
+  <div class="step"><span class="num">10</span> <strong>Loss recovery:</strong> if no valid markers for > <code>loss_timeout</code> seconds → reset latched flag, <strong>clear rolling covariance deque</strong> → re-latch on next detection (covariance starts high after recovery)</div>
+
+  <h3>Data Flow — Point Cloud Rate Control</h3>
+  <div class="step"><span class="num">11</span> On <code>/aruco/detection_status</code>: store <code>adaptive_mode = msg.data[2]</code> (0=disabled, 1=2K, 2=1080, 3=720, 4=VGA)</div>
+  <div class="step"><span class="num">12</span> Every <code>pointcloud_update_interval</code> (3 s):</div>
+  <div style="padding-left: 3rem;">
+    &nbsp;&nbsp;&nbsp;<code>rate = pointcloud_rate_map[adaptive_mode]</code><br>
+    &nbsp;&nbsp;&nbsp;<strong>try:</strong> call <code>set_parameters({depth.point_cloud_freq: rate})</code> on ZED node<br>
+    &nbsp;&nbsp;&nbsp;<strong>except:</strong> pass — ZED node may be down; retry next cycle</div>
+
+  <h3>Rate Map</h3>
+  <table>
+    <tr><th>Mode</th><th>Resolution</th><th>Detection node rate</th><th>Point cloud frequency</th><th>Scenario</th></tr>
+    <tr><td>0</td><td>Disabled / unknown</td><td>10 Hz (default)</td><td>10.0 Hz</td><td>Fallback</td></tr>
+    <tr><td>1</td><td>2208×1242 (HD2K)</td><td>5 Hz</td><td>10.0 Hz</td><td>Far markers — need full depth for far obstacles</td></tr>
+    <tr><td>2</td><td>1920×1080 (HD1080)</td><td>10 Hz</td><td>7.0 Hz</td><td>Medium distance</td></tr>
+    <tr><td>3</td><td>1280×720 (HD720)</td><td>15 Hz</td><td>5.0 Hz</td><td>Close markers — depth less critical</td></tr>
+    <tr><td>4</td><td>640×480 (VGA)</td><td>20 Hz</td><td>3.0 Hz</td><td>Very close — ArUco provides best correction, depth least needed</td></tr>
+  </table>
+
+  <h3>Reused Code from <code>yaw_test_node.py</code></h3>
+  <ul>
+    <li><code>_quat_to_normal_camera()</code> — marker quaternion → wall normal in camera frame</li>
+    <li><code>_rotation_matrix_from_quat()</code> — quaternion → 3x3 rotation matrix</li>
+    <li><code>_normalize_angle_deg()</code> — wrap to [-180, 180)</li>
+    <li><code>_circular_mean_deg()</code> — circular mean of angle list</li>
+    <li>TF lookup pattern with identity fallback</li>
+    <li>Inter-marker agreement check logic</li>
+    <li>Jump rejection logic</li>
+  </ul>
+</div>
+
+<hr>
+
+<h2>2. attitude_params.yaml — CREATE</h2>
+
+<p class="file-path">src/aruco_detection/config/attitude_params.yaml</p>
+
+<pre><code>aruco_attitude_node:
+  ros__parameters:
+    marker_frame: zed_camera_link
+    base_frame: base_footprint
+    yaw_threshold: 10.0
+    jump_threshold: 15.0
+    loss_timeout: 0.5
+    temporal_window: 20
+    min_yaw_stddev: 0.5
+    max_yaw_stddev: 20.0
+    hz: 20.0
+    queue_size: 10
+    valid_marker_ids: [0, 1, 42]
+    pointcloud_rate_map: '{"0": 10.0, "1": 10.0, "2": 7.0, "3": 5.0, "4": 3.0}'
+    pointcloud_update_interval: 3.0</code></pre>
+
+<table>
+  <tr><th>Parameter</th><th>Value</th><th>Description</th></tr>
+  <tr><td><code>marker_frame</code></td><td><code>zed_camera_link</code></td><td>TF frame of the camera (markers are detected in this frame)</td></tr>
+  <tr><td><code>base_frame</code></td><td><code>base_footprint</code></td><td>Robot base frame (all markers transformed to this frame)</td></tr>
+  <tr><td><code>yaw_threshold</code></td><td>10.0 deg</td><td>Inter-marker max pairwise disagreement; frame rejected if exceeded</td></tr>
+  <tr><td><code>jump_threshold</code></td><td>15.0 deg</td><td>Frame-to-frame yaw jump; frame rejected if exceeded</td></tr>
+  <tr><td><code>loss_timeout</code></td><td>0.5 s</td><td>No valid markers for this duration → reset latch</td></tr>
+  <tr><td><code>temporal_window</code></td><td>20 frames</td><td>Rolling window size for dynamic covariance computation</td></tr>
+  <tr><td><code>min_yaw_stddev</code></td><td>0.5 deg</td><td>Covariance floor (minimum uncertainty)</td></tr>
+  <tr><td><code>max_yaw_stddev</code></td><td>20.0 deg</td><td>Covariance ceiling (maximum uncertainty)</td></tr>
+  <tr><td><code>hz</code></td><td>20.0</td><td>Publish rate</td></tr>
+  <tr><td><code>queue_size</code></td><td>10</td><td>ROS subscriber/publisher queue depth</td></tr>
+  <tr><td><code>valid_marker_ids</code></td><td>[0, 1, 42]</td><td>Whitelist of marker IDs to accept</td></tr>
+  <tr><td><code>pointcloud_rate_map</code></td><td>JSON dict</td><td>Maps adaptive_mode → ZED depth.point_cloud_freq in Hz</td></tr>
+  <tr><td><code>pointcloud_update_interval</code></td><td>3.0 s</td><td>How often to re-send the set_parameters call to the ZED node</td></tr>
+</table>
+
+<hr>
+
+<h2>3. scripts/attitude_node — CREATE</h2>
+
+<p class="file-path">src/aruco_detection/scripts/attitude_node</p>
+
+<pre><code>#!/usr/bin/env python3
+from aruco_detection.attitude_node import main
+main()</code></pre>
+
+<p>Identical pattern to <code>scripts/yaw_test_node</code> and <code>scripts/detection_node</code>.</p>
+
+<hr>
+
+<h2>4. setup.py — EDIT</h2>
+
+<p class="file-path">src/aruco_detection/setup.py</p>
+
+<p>Two lines change:</p>
+
+<pre><code><span class="diff-rem diff-line">  (os.path.join("share", package_name, "launch"), glob("launch/*.launch.py")),</span>
+<span class="diff-add diff-line">  (os.path.join("share", package_name, "launch"), glob("launch/*.launch.py")),</span>
+<span class="diff-add diff-line">  (os.path.join("share", package_name, "config"), glob("config/*")),</span>
+  ...
+<span class="diff-rem diff-line">  scripts=["scripts/detection_node", "scripts/debug_viewer", "scripts/yaw_test_node"],</span>
+<span class="diff-add diff-line">  scripts=["scripts/detection_node", "scripts/debug_viewer", "scripts/yaw_test_node", "scripts/attitude_node"],</span></code></pre>
+
+<p><strong>Note:</strong> The <code>data_files</code> config glob is already present on line 14 — no change needed.</p>
+
+<hr>
+
+<h2>5. yaw_correction.launch.py — CREATE</h2>
+
+<p class="file-path">src/aruco_detection/launch/yaw_correction.launch.py</p>
+
+<pre><code>import os
+from launch import LaunchDescription
+from launch_ros.actions import Node
+from ament_index_python.packages import get_package_share_directory
+
+
+def generate_launch_description():
+    attitude_config = os.path.join(
+        get_package_share_directory("aruco_detection"),
+        "config",
+        "attitude_params.yaml",
+    )
+
+    return LaunchDescription([
+        Node(
+            package="aruco_detection",
+            executable="attitude_node",
+            name="aruco_attitude_node",
+            output="screen",
+            parameters=[attitude_config],
+        ),
+    ])</code></pre>
+
+<hr>
+
+<h2>6. ekf_params.yaml — CREATE</h2>
+
+<p class="file-path">src/my_robot_bringup/config/ekf_params.yaml</p>
+
+<pre><code>ekf_filter_node:
+  ros__parameters:
+
+    # ── Wheel odometry ──
+    odom0: /diff_drive_controller/odom
+    odom0_config: [true, true, false, false, false, false,
+                   false, false, false, false, false, false,
+                   true, true, true]
+    odom0_differential: true
+    odom0_relative: false
+    odom0_queue_size: 10
+
+    # ── ZED IMU ──
+    imu0: /zed/zed_node/imu/data
+    imu0_config: [false, false, false, true, true, false,
+                  false, false, false, false, false, false,
+                  true, true, true]
+    imu0_differential: false
+    imu0_relative: false
+    imu0_queue_size: 10
+    imu0_remove_gravitational_acceleration: true
+
+    # ── ArUco visual yaw ──
+    pose0: /aruco/attitude
+    pose0_config: [false, false, false, false, false, true,
+                   false, false, false, false, false, false,
+                   false, false, false]
+    pose0_differential: false
+    pose0_relative: false
+    pose0_queue_size: 10
+
+    # ── Frames ──
+    map_frame: map
+    odom_frame: odom
+    world_frame: odom
+
+    # ── General ──
+    two_d_mode: false
+    predict_to_current_time: true
+    publish_tf: true
+    print_diagnostics: true
+    frequency: 50.0
+    debug: false</code></pre>
+
+<table>
+  <tr><th>Input</th><th>Topic</th><th>Fused States</th><th>Frequency</th></tr>
+  <tr><td><code>odom0</code></td><td><code>/diff_drive_controller/odom</code></td><td>x (differential), y (differential), vx, vy, v_yaw</td><td>~50 Hz</td></tr>
+  <tr><td><code>imu0</code></td><td><code>/zed/zed_node/imu/data</code></td><td>roll, pitch, v_roll, v_pitch, v_yaw</td><td>~400 Hz</td></tr>
+  <tr><td><code>pose0</code></td><td><code>/aruco/attitude</code></td><td>yaw (covariance-weighted)</td><td>~20 Hz</td></tr>
+</table>
+
+<hr>
+
+<h2>7a. zed_override.yaml — UPDATE</h2>
+
+<p class="file-path">src/aruco_detection/config/zed_override.yaml</p>
+
+<p>Add the <code>depth</code> section to control point cloud load while running HD2K grab resolution:</p>
+
+<pre><code>/**:
+    ros__parameters:
+        general:
+            grab_resolution: 'HD2K'
+            pub_resolution: 'NATIVE'
+        depth:
+            point_cloud_freq: 10.0
+            point_cloud_res: 'REDUCED'</code></pre>
+
+<table>
+  <tr><th>Parameter</th><th>Value</th><th>Why</th></tr>
+  <tr><td><code>grab_resolution</code></td><td>HD2K</td><td>Full 2208×1242 RGB for far ArUco detection</td></tr>
+  <tr><td><code>pub_resolution</code></td><td>NATIVE</td><td>Publish RGB at same resolution as grab (HD2K)</td></tr>
+  <tr><td><code>point_cloud_freq</code></td><td>10.0 Hz</td><td>Start at 10 Hz — attitude_node may lower dynamically</td></tr>
+  <tr><td><code>point_cloud_res</code></td><td>REDUCED</td><td>Half width/height depth → ~685K pts/frame vs 2.7M at COMPACT</td></tr>
+</table>
+
+<hr>
+
+<h2>7b. detection_node.py — EDIT</h2>
+
+<p class="file-path">src/aruco_detection/aruco_detection/detection_node.py</p>
+
+<h3>7b-i. Adaptive publish rate by resolution</h3>
+
+<p>Add parameter declaration:</p>
+<pre><code>self.declare_parameter("resolution_to_rate",
+    '{"2208x1242": 5.0, "1920x1080": 10.0, "1280x720": 15.0, "640x480": 20.0}')</code></pre>
+
+<p>Parse as dict (same pattern as <code>marker_azimuths</code> in yaw_test_node). When <code>_current_res_idx</code> changes, recompute <code>self._pub_interval</code> from the mapped rate:</p>
+
+<pre><code># Inside the adaptive step section, when old_idx != new_idx:
+new_res = self._resolution_chain[self._current_res_idx]
+key = f"{new_res[0]}x{new_res[1]}"
+rate = self._rate_map.get(key, 10.0)
+self._pub_interval = rclpy.duration.Duration(seconds=1.0 / rate)
+self.get_logger().info(f"Publish rate: {rate:.0f} Hz (res: {key})")</code></pre>
+
+<table>
+  <tr><th>Resolution</th><th>Rate</th><th>Budget</th><th>Margin vs p99</th></tr>
+  <tr><td>2208×1242 (HD2K)</td><td><strong>5 Hz</strong></td><td>200 ms</td><td>+109 ms (p99=91 ms)</td></tr>
+  <tr><td>1920×1080 (HD1080)</td><td><strong>10 Hz</strong></td><td>100 ms</td><td>+37 ms (p99=63 ms)</td></tr>
+  <tr><td>1280×720 (HD720)</td><td><strong>15 Hz</strong></td><td>67 ms</td><td>+23 ms (p99=44 ms)</td></tr>
+  <tr><td>640×480 (VGA)</td><td><strong>20 Hz</strong></td><td>50 ms</td><td>+40 ms (p99=10 ms)</td></tr>
+</table>
+
+<h3>7b-ii. Failure forget timeout</h3>
+
+<p>Add parameter:</p>
+<pre><code>self.declare_parameter("failure_forget_timeout", 10.0)</code></pre>
+
+<p>In the step-down section (when <code>_consecutive_misses >= _stepup_frames</code>), before checking distance/angle tolerances:</p>
+
+<pre><code>time_since_detection = (now - self._last_detection_time).nanoseconds * 1e-9
+if time_since_detection > self._failure_forget_timeout:
+    self._failed_res_idx = -1  # forget past failure, retry climb
+    self.get_logger().info("Failure forget timeout — will retry higher resolution")</code></pre>
+
+<p>Without this, the robot spends 83% of time at 720p because the failure memory (<code>_failed_res_idx</code>) permanently blocks re-ascent to 2K at the same pose. After 10 s, the robot has likely moved to a new area where 2K would succeed.</p>
+
+<hr>
+
+<h2>7c. my_robot.launch.py — EDIT</h2>
+
+<p class="file-path">src/my_robot_bringup/launch/my_robot.launch.py</p>
+
+<p>Pass the <code>zed_override.yaml</code> path to the ZED wrapper so it runs at HD2K:</p>
+
+<pre><code>from ament_index_python.packages import get_package_share_path, get_package_share_directory
+<span class="diff-add diff-line">from ament_index_python.packages import get_package_share_directory</span>
+import os
+from ament_index_python.packages import get_package_share_path
+
+def generate_launch_description():
+    controllers_config_path = os.path.join(get_package_share_directory("my_robot_bringup"), "config", "my_robot_controller.yaml")
+    ...
+<span class="diff-add diff-line">    aruco_share = get_package_share_directory("aruco_detection")</span>
+<span class="diff-add diff-line">    zed_override = os.path.join(aruco_share, "config", "zed_override.yaml")</span>
+    ...
+
+    zed_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(...),
+        launch_arguments={
+            'camera_model': 'zed2i',
+            'publish_tf': 'false',
+            'publish_map_tf': 'false',
+            'publish_urdf': 'false'
+<span class="diff-add diff-line">            'ros_params_override_path': zed_override,</span>
+        }.items()
+    )</code></pre>
+
+<hr>
+
+<h2>8. my_robot_controller.yaml — EDIT</h2>
+
+<p class="file-path">src/my_robot_bringup/config/my_robot_controller.yaml</p>
+
+<p>Change line 34:</p>
+
+<pre><code><span class="diff-rem diff-line">    enable_odom_tf: true</span>
+<span class="diff-add diff-line">    enable_odom_tf: false</span></code></pre>
+
+<p><strong>Why:</strong> Only one node can publish <code>odom→base_footprint</code>. The EKF produces the fused estimate and publishes this TF. The diff_drive controller only publishes raw twist commands after this change.</p>
+
+<hr>
+
+<h2>9. nav2_params_rover.yaml — EDIT</h2>
+
+<p class="file-path">src/my_robot_bringup/config/nav2_params_rover.yaml</p>
+
+<h3>8a. bt_navigator (line 39)</h3>
+<pre><code><span class="diff-rem diff-line">    odom_topic: /diff_drive_controller/odom</span>
+<span class="diff-add diff-line">    odom_topic: /odometry/filtered</span></code></pre>
+
+<h3>8b. velocity_smoother (line 311)</h3>
+<pre><code><span class="diff-rem diff-line">    odom_topic: /diff_drive_controller/odom</span>
+<span class="diff-add diff-line">    odom_topic: /odometry/filtered</span></code></pre>
+
+<h3>8c. controller_server — add odom_topic (after line 97)</h3>
+<pre><code>    controller_frequency: 20.0
+<span class="diff-add diff-line">    odom_topic: /odometry/filtered</span></code></pre>
+
+<hr>
+
+<h2>10. package.xml — EDIT</h2>
+
+<p class="file-path">src/my_robot_bringup/package.xml</p>
+
+<p>Add dependency after <code>zed_wrapper</code> (line 27):</p>
+
+<pre><code>  &lt;exec_depend&gt;zed_wrapper&lt;/exec_depend&gt;
+<span class="diff-add diff-line">  &lt;exec_depend&gt;robot_localization&lt;/exec_depend&gt;</span></code></pre>
+
+<hr>
+
+<h2>11. nav2_navigation.launch.py — EDIT</h2>
+
+<p class="file-path">src/my_robot_bringup/launch/nav2_navigation.launch.py</p>
+
+<p>Insert EKF and attitude nodes <strong>before</strong> the Nav2 bringup include, after the cmd_vel_relay node. The EKF needs a TimerAction to give the detection_node + attitude_node time to start producing yaw estimates.</p>
+
+<div class="card pending">
+  <h3>Launch Order</h3>
+  <ol>
+    <li><code>my_robot.launch.py</code> — RSP, ros2_control, diff_drive (TF disabled), ZED wrapper (HD2K with zed_override)</li>
+    <li>pointcloud_to_laserscan</li>
+    <li>cmd_vel_relay</li>
+    <li><strong>detection_node</strong> — ArUco marker detection from HD2K RGB images</li>
+    <li><strong>attitude_node</strong> — subscribes to <code>/aruco/markers</code>, publishes <code>/aruco/attitude</code>; also throttles ZED point cloud rate based on detection status</li>
+    <li><strong>EKF node</strong> (delayed 3 s) — subscribes to diff_drive odom + ZED IMU + ArUco yaw, publishes <code>/odometry/filtered</code></li>
+    <li>Nav2 bringup — consumes <code>/odometry/filtered</code></li>
+    <li>RViz2</li>
+  </ol>
+</div>
+
+<p>Modified launch file structure:</p>
+
+<pre><code>import os
+
+from ament_index_python.packages import get_package_share_directory
+from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, TimerAction
+from launch.conditions import IfCondition
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import LaunchConfiguration
+from launch_ros.actions import Node
+
+
+def generate_launch_description():
+    bringup_share = get_package_share_directory("my_robot_bringup")
+    nav2_share = get_package_share_directory("nav2_bringup")
+    aruco_share = get_package_share_directory("aruco_detection")
+
+    robot_launch = os.path.join(bringup_share, "launch", "my_robot.launch.py")
+    pointcloud_params = os.path.join(bringup_share, "config", "pointcloud_to_laserscan_nav2.yaml")
+    nav2_params = os.path.join(bringup_share, "config", "nav2_params_rover.yaml")
+    ekf_params = os.path.join(bringup_share, "config", "ekf_params.yaml")
+    attitude_params = os.path.join(aruco_share, "config", "attitude_params.yaml")
+    default_map = os.path.join(bringup_share, "maps", "rover_real_map.yaml")
+    rviz_config = os.path.join(nav2_share, "rviz", "nav2_default_view.rviz")
+
+    return LaunchDescription(
+        [
+            DeclareLaunchArgument("start_robot_bringup", default_value="true"),
+            DeclareLaunchArgument("use_rviz", default_value="true"),
+            DeclareLaunchArgument("map", default_value=default_map),
+            DeclareLaunchArgument(
+                "pointcloud_topic",
+                default_value="/zed/zed_node/point_cloud/cloud_registered",
+            ),
+            DeclareLaunchArgument("scan_topic", default_value="/zed/scan"),
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(robot_launch),
+                launch_arguments={"use_rviz": "false"}.items(),
+                condition=IfCondition(LaunchConfiguration("start_robot_bringup")),
+            ),
+            Node(
+                package="pointcloud_to_laserscan",
+                executable="pointcloud_to_laserscan_node",
+                name="pointcloud_to_laserscan",
+                output="screen",
+                parameters=[pointcloud_params],
+                remappings=[
+                    ("cloud_in", LaunchConfiguration("pointcloud_topic")),
+                    ("scan", LaunchConfiguration("scan_topic")),
+                ],
+            ),
+            Node(
+                package="my_robot_bringup",
+                executable="nav2_cmd_vel_relay.py",
+                name="nav2_cmd_vel_relay",
+                output="screen",
+                parameters=[
+                    {
+                        "input_topic": "/cmd_vel",
+                        "output_topic": "/diff_drive_controller/cmd_vel",
+                        "output_stamped": True,
+                        "frame_id": "base_footprint",
+                        "max_linear_x": 0.25,
+                        "max_angular_z": 0.50,
+                        "command_timeout": 0.5,
+                        "publish_zero_on_timeout": True,
+                    }
+                ],
+            ),
+            # ── Phase 2b: ArUco detection → attitude → EKF fusion ──
+            Node(
+                package="aruco_detection",
+                executable="detection_node",
+                name="aruco_detection_node",
+                output="screen",
+                parameters=[os.path.join(aruco_share, "config", "zed_params.yaml")],
+            ),
+            Node(
+                package="aruco_detection",
+                executable="attitude_node",
+                name="aruco_attitude_node",
+                output="screen",
+                parameters=[attitude_params],
+            ),
+            TimerAction(
+                period=3.0,
+                actions=[
+                    Node(
+                        package="robot_localization",
+                        executable="ekf_filter_node",
+                        name="ekf_filter_node",
+                        output="screen",
+                        parameters=[ekf_params],
+                    )
+                ],
+            ),
+            # ── Nav2 ──
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(
+                    os.path.join(nav2_share, "launch", "bringup_launch.py")
+                ),
+                launch_arguments={
+                    "map": LaunchConfiguration("map"),
+                    "use_sim_time": "false",
+                    "params_file": nav2_params,
+                    "autostart": "true",
+                    "use_composition": "False",
+                }.items(),
+            ),
+            Node(
+                package="rviz2",
+                executable="rviz2",
+                name="rviz2",
+                output="screen",
+                arguments=["-d", rviz_config],
+                parameters=[{"use_sim_time": False}],
+                condition=IfCondition(LaunchConfiguration("use_rviz")),
+            ),
+        ]
+    )</code></pre>
+
+<h2>Load Analysis</h2>
+
+<div class="card">
+  <h3>Point Cloud Bandwidth Comparison</h3>
+
+  <table>
+    <tr><th>Configuration</th><th>Points/frame</th><th>Publish rate</th><th>Points/sec</th><th>vs Current</th></tr>
+    <tr><td>Current (HD720, COMPACT, 30 Hz)</td><td>~230K</td><td>30 Hz</td><td><strong>~6.9M</strong></td><td>Baseline</td></tr>
+    <tr><td>HD2K, REDUCED, 10 Hz static</td><td>~685K</td><td>10 Hz</td><td><strong>~6.85M</strong></td><td>≈ same</td></tr>
+    <tr><td>HD2K, REDUCED, dynamic 10→3 Hz</td><td>~685K</td><td>3–10 Hz</td><td><strong>~2–7M</strong></td><td>29–100%</td></tr>
+   </table>
+
+  <p><strong>Key insight:</strong> At HD2K REDUCED 10 Hz, the point cloud data rate matches the current HD720 COMPACT 30 Hz configuration (~6.9M pts/sec). The depth computation is handled by the ZED SDK on the GPU regardless of publish resolution — the savings are in USB/memory bandwidth for point cloud serialization and transport.</p>
+
+  <p>When the attitude_node dynamically lowers <code>point_cloud_freq</code> to 3 Hz (VGA mode, robot close to markers), the data rate drops to ~2M pts/sec — a <strong>71% reduction</strong> from current. This directly frees Jetson memory bandwidth for the detection pipeline.</p>
+
+  <h3>Detection Compute Budget</h3>
+
+  <table>
+    <tr><th>Resolution</th><th>Detection rate</th><th>Budget per frame</th><th>p99 compute</th><th>Headroom</th></tr>
+    <tr><td>2208×1242 (HD2K)</td><td>5 Hz</td><td>200 ms</td><td>91 ms</td><td>109 ms ✓</td></tr>
+    <tr><td>1920×1080 (HD1080)</td><td>10 Hz</td><td>100 ms</td><td>63 ms</td><td>37 ms ✓</td></tr>
+    <tr><td>1280×720 (HD720)</td><td>15 Hz</td><td>67 ms</td><td>44 ms</td><td>23 ms ✓</td></tr>
+    <tr><td>640×480 (VGA)</td><td>20 Hz</td><td>50 ms</td><td>10 ms</td><td>40 ms ✓</td></tr>
+  </table>
+
+  <p>All resolutions have positive headroom at their assigned rates. The 109 ms margin on HD2K at 5 Hz means the GPU has 54% idle time at the worst case — no pipeline starvation.</p>
+</div>
+
+<h2>Implementation Order</h2>
+
+<ol>
+  <li><strong>zed_override.yaml</strong> — add depth section (point_cloud_freq, point_cloud_res)</li>
+  <li><strong>detection_node.py</strong> — add <code>resolution_to_rate</code> adaptive publish rate + <code>failure_forget_timeout</code></li>
+  <li><strong>zed_params.yaml</strong> — add new parameter defaults for the detection_node additions</li>
+  <li><strong>attitude_node.py</strong> — differential-yaw node + point cloud rate relay (detection_status sub, set_parameters timer)</li>
+  <li><strong>attitude_params.yaml</strong> — parameter file with rate map</li>
+  <li><strong>scripts/attitude_node</strong> — entry point</li>
+  <li><strong>setup.py</strong> — register new script</li>
+  <li><strong>yaw_correction.launch.py</strong> — standalone launch (useful for testing)</li>
+  <li><strong>ekf_params.yaml</strong> — three-input EKF fusion config</li>
+  <li><strong>my_robot_controller.yaml</strong> — <code>enable_odom_tf: false</code></li>
+  <li><strong>my_robot.launch.py</strong> — pass <code>ros_params_override_path</code> to ZED wrapper</li>
+  <li><strong>nav2_params_rover.yaml</strong> — redirect odom_topic in bt_navigator, velocity_smoother, controller_server</li>
+  <li><strong>package.xml</strong> — add robot_localization exec_depend</li>
+  <li><strong>nav2_navigation.launch.py</strong> — integrate detection_node + attitude_node + EKF</li>
+  <li><strong>Rebuild</strong> — <code>colcon build --packages-select aruco_detection my_robot_bringup</code></li>
+</ol>
+
+<h2>Verification</h2>
+
+<div class="card">
+  <h3>1. TF Chain Check (no robot movement)</h3>
+  <pre><code>ros2 run tf2_tools tf2_echo map odom</code></pre>
+  <pre><code>ros2 run tf2_tools tf2_echo odom base_footprint</code></pre>
+  <p>Confirm <code>odom→base_footprint</code> is published by EKF, <strong>not</strong> by diff_drive_controller.</p>
+
+  <h3>2. Topic Flow Check</h3>
+  <pre><code>ros2 topic echo /aruco/attitude --once
+ros2 topic echo /odometry/filtered --once
+ros2 topic info /aruco/attitude
+ros2 topic info /odometry/filtered</code></pre>
+
+  <h3>3. Yaw Correction During Manual Rotation</h3>
+  <p>With the robot off the ground or on a turntable, rotate manually while watching:</p>
+  <pre><code>ros2 topic echo /odometry/filtered --field pose.pose.orientation
+ros2 topic echo /diff_drive_controller/odom --field pose.pose.orientation</code></pre>
+  <p>The raw odometry heading drifts while <code>/odometry/filtered</code> is corrected by the ArUco yaw.</p>
+
+  <h3>4. Dynamic Covariance Behavior</h3>
+  <pre><code>ros2 topic echo /aruco/attitude --field pose.covariance</code></pre>
+  <p>covariance[35] should rise when markers are far/noisy and fall when close/stable.</p>
+
+  <h3>5. Loss Recovery</h3>
+  <p>Cover the camera for 2+ seconds, then uncover. The log should show a re-latch message and yaw should resume without a discontinuity.</p>
+</div>
+
+<div class="meta">
+  RoverTech Nav2 · ROS 2 Humble · Phase 2b Implementation Spec · 2026-07-24
+</div>
+
+</body>
+</html>

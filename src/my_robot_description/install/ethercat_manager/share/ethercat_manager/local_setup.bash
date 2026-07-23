@@ -1,0 +1,1 @@
+/home/RoverTech/nav2_ws_new/build/ethercat_manager/ament_cmake_environment_hooks/local_setup.bash

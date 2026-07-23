@@ -1,0 +1,1 @@
+/home/RoverTech/nav2_ws_new/build/ethercat_msgs/rosidl_typesupport_introspection_c/ethercat_msgs/msg/rosidl_typesupport_introspection_c__visibility_control.h

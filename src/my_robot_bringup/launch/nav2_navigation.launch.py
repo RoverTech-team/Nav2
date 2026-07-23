@@ -2,7 +2,7 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, TimerAction
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
@@ -12,10 +12,14 @@ from launch_ros.actions import Node
 def generate_launch_description():
     bringup_share = get_package_share_directory("my_robot_bringup")
     nav2_share = get_package_share_directory("nav2_bringup")
+    aruco_share = get_package_share_directory("aruco_detection")
 
     robot_launch = os.path.join(bringup_share, "launch", "my_robot.launch.py")
     pointcloud_params = os.path.join(bringup_share, "config", "pointcloud_to_laserscan_nav2.yaml")
     nav2_params = os.path.join(bringup_share, "config", "nav2_params_rover.yaml")
+    ekf_params = os.path.join(bringup_share, "config", "ekf_params.yaml")
+    attitude_params = os.path.join(aruco_share, "config", "attitude_params.yaml")
+    zed_params = os.path.join(aruco_share, "config", "zed_params.yaml")
     default_map = os.path.join(bringup_share, "maps", "rover_real_map.yaml")
     rviz_config = os.path.join(nav2_share, "rviz", "nav2_default_view.rviz")
 
@@ -63,8 +67,38 @@ def generate_launch_description():
                     }
                 ],
             ),
+            # ── Phase 2b: ArUco detection → attitude → EKF fusion ──
+            Node(
+                package="aruco_detection",
+                executable="detection_node",
+                name="aruco_detection_node",
+                output="screen",
+                parameters=[zed_params],
+            ),
+            Node(
+                package="aruco_detection",
+                executable="attitude_node",
+                name="aruco_attitude_node",
+                output="screen",
+                parameters=[attitude_params],
+            ),
+            TimerAction(
+                period=3.0,
+                actions=[
+                    Node(
+                        package="robot_localization",
+                        executable="ekf_filter_node",
+                        name="ekf_filter_node",
+                        output="screen",
+                        parameters=[ekf_params],
+                    )
+                ],
+            ),
+            # ── Nav2 ──
             IncludeLaunchDescription(
-                PythonLaunchDescriptionSource(os.path.join(nav2_share, "launch", "bringup_launch.py")),
+                PythonLaunchDescriptionSource(
+                    os.path.join(nav2_share, "launch", "bringup_launch.py")
+                ),
                 launch_arguments={
                     "map": LaunchConfiguration("map"),
                     "use_sim_time": "false",

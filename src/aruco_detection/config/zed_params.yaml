@@ -6,4 +6,13 @@ aruco_detection:
     aruco_dictionaries: ["DICT_6X6_250", "DICT_7X7_250"]
     marker_frame: zed_camera_link
     publish_rate: 10.0
-    publish_debug_image: false
+    publish_debug_image: true
+    adaptive_resolution: true
+    resolution_chain: ["HD2K", "HD1080", "HD720", "VGA"]
+    scan_timeout: 3.0
+    stepdown_frames: 10
+    stepup_frames: 3
+    stepdown_distance_tolerance: 0.3
+    stepdown_angle_tolerance: 10.0
+    resolution_to_rate: '{"2208x1242": 5.0, "1920x1080": 10.0, "1280x720": 15.0, "640x480": 20.0}'
+    failure_forget_timeout: 10.0

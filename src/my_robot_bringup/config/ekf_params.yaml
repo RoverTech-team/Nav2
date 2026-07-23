@@ -1,0 +1,43 @@
+ekf_filter_node:
+  ros__parameters:
+
+    # ── Wheel odometry ──
+    odom0: /diff_drive_controller/odom
+    odom0_config: [true, true, false, false, false, false,
+                   false, false, false, false, false, false,
+                   true, true, true]
+    odom0_differential: true
+    odom0_relative: false
+    odom0_queue_size: 10
+
+    # ── ZED IMU ──
+    imu0: /zed/zed_node/imu/data
+    imu0_config: [false, false, false, true, true, false,
+                  false, false, false, false, false, false,
+                  true, true, true]
+    imu0_differential: false
+    imu0_relative: false
+    imu0_queue_size: 10
+    imu0_remove_gravitational_acceleration: true
+
+    # ── ArUco visual yaw ──
+    pose0: /aruco/attitude
+    pose0_config: [false, false, false, false, false, true,
+                   false, false, false, false, false, false,
+                   false, false, false]
+    pose0_differential: false
+    pose0_relative: false
+    pose0_queue_size: 10
+
+    # ── Frames ──
+    map_frame: map
+    odom_frame: odom
+    world_frame: odom
+
+    # ── General ──
+    two_d_mode: false
+    predict_to_current_time: true
+    publish_tf: true
+    print_diagnostics: true
+    frequency: 50.0
+    debug: false

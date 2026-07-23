@@ -20,6 +20,9 @@ def generate_launch_description():
     rviz_config_path = os.path.join(get_package_share_path('my_robot_description'),
                                     'rviz', 'urdf_config.rviz')
 
+    aruco_share = get_package_share_directory("aruco_detection")
+    zed_override = os.path.join(aruco_share, "config", "zed_override.yaml")
+
     robot_description = ParameterValue(Command(['xacro ', urdf_path]), value_type=str)
 
     use_rviz_arg = DeclareLaunchArgument("use_rviz", default_value="true")
@@ -80,16 +83,9 @@ def generate_launch_description():
             'camera_model': 'zed2i',
             'publish_tf': 'false',
             'publish_map_tf': 'false',
-            'publish_urdf': 'false'
+            'publish_urdf': 'false',
+            'ros_params_override_path': zed_override,
         }.items()
-    )
-
-    aruco_detection_node = Node(
-        package="aruco_detection",
-        executable="detection_node",
-        name="aruco_detection_node",
-        output="screen",
-        parameters=[os.path.join(get_package_share_directory("aruco_detection"), "config", "zed_params.yaml")],
     )
 
     return LaunchDescription([
@@ -100,6 +96,5 @@ def generate_launch_description():
         joint_state_publisher_gui_node,
         diff_drive_controller_spawner,
         rviz2_node,
-        zed_launch,
-        aruco_detection_node,
+        zed_launch
     ])

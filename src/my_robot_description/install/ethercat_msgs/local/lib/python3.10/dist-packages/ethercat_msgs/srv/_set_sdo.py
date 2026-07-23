@@ -1,0 +1,1 @@
+/home/RoverTech/nav2_ws_new/build/ethercat_msgs/rosidl_generator_py/ethercat_msgs/srv/_set_sdo.py

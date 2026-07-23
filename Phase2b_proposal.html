@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Phase 2b Proposal — EKF Fusion + ArUco Yaw Correction</title>
+<style>
+  :root {
+    --bg: #0d1117; --card: #161b22; --border: #30363d;
+    --text: #c9d1d9; --heading: #f0f6fc; --accent: #58a6ff;
+    --green: #3fb950; --orange: #d29922;
+    --code-bg: #1c2128;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg); color: var(--text); line-height: 1.6;
+    padding: 2rem; max-width: 900px; margin: 0 auto;
+  }
+  h1 { color: var(--heading); font-size: 1.6rem; margin-bottom: 0.25rem; }
+  h1 small { display: block; font-size: 0.85rem; font-weight: 400; opacity: 0.6; margin-top: 0.25rem; }
+  h2 { color: var(--heading); font-size: 1.3rem; margin: 1.5rem 0 0.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; }
+  h3 { color: var(--accent); font-size: 1.05rem; margin: 1.25rem 0 0.4rem; }
+  h4 { color: var(--heading); font-size: 0.95rem; margin: 0.75rem 0 0.3rem; }
+  p, li { margin-bottom: 0.4rem; }
+  ul, ol { padding-left: 1.5rem; }
+  code {
+    background: var(--code-bg); border: 1px solid var(--border);
+    padding: 0.15em 0.4em; border-radius: 4px; font-size: 0.9em;
+    font-family: 'SF Mono', monospace; color: var(--green);
+  }
+  pre {
+    background: var(--code-bg); border: 1px solid var(--border);
+    border-radius: 6px; padding: 0.8rem; overflow-x: auto;
+    margin: 0.5rem 0; font-size: 0.8rem;
+    font-family: 'SF Mono', monospace;
+  }
+  pre code { background: none; border: none; padding: 0; color: inherit; }
+  .card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 8px; padding: 1.25rem; margin: 1rem 0;
+  }
+  .card.pending { border-left: 4px solid var(--orange); }
+  .card.info { border-left: 4px solid var(--accent); }
+  .diagram {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 8px; padding: 1.5rem; margin: 1rem 0;
+    font-family: 'SF Mono', monospace; font-size: 0.75rem;
+    line-height: 1.5; white-space: pre; overflow-x: auto;
+  }
+  table { width: 100%; border-collapse: collapse; margin: 0.5rem 0; font-size: 0.9rem; }
+  th, td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border); }
+  th { color: var(--heading); font-weight: 600; }
+  .tag {
+    display: inline-block; font-size: 0.7rem; font-weight: 600;
+    padding: 0.15em 0.5em; border-radius: 3px; vertical-align: middle;
+  }
+  .tag-done { background: #1b3a1d; color: var(--green); }
+  .tag-todo { background: #3d2e00; color: var(--orange); }
+  .meta { opacity: 0.5; font-size: 0.8rem; margin-top: 2rem; border-top: 1px solid var(--border); padding-top: 1rem; }
+  .step { margin: 0.5rem 0; padding: 0.5rem; background: var(--code-bg); border-radius: 6px; border: 1px solid var(--border); font-size: 0.9rem; }
+  .step .num { display: inline-block; width: 1.5rem; height: 1.5rem; line-height: 1.5rem; text-align: center; border-radius: 50%; margin-right: 0.5rem; font-size: 0.8rem; font-weight: 700; background: var(--orange); color: var(--bg); }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0; }
+  @media (max-width: 700px) { .grid { grid-template-columns: 1fr; } }
+  .summary-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  @media (max-width: 700px) { .summary-grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<h1>Phase 2b Proposal <small>EKF Sensor Fusion + Visual Yaw Correction — Add to Existing AMCL + Raw Odom</small></h1>
+
+<div class="card info">
+  <strong>Status:</strong> Proposed — ready for implementation after review &nbsp;|&nbsp;
+  <strong>ROS 2:</strong> Humble &nbsp;|&nbsp;
+  <strong>Robot:</strong> Skid-steer rover, ZED 2i camera, diff_drive controller
+</div>
+
+<h2>Problem</h2>
+
+<div class="card">
+  <p>The robot currently has <strong>no sensor fusion</strong>. The localization chain is:</p>
+  <div class="diagram">
+    AMCL (laser map) ──► map→odom TF          ✓ works
+
+    diff_drive controller ──► /diff_drive_controller/odom
+      └── publishes odom→base_footprint TF    ✗ no yaw correction
+      └── Nav2 consumes raw odometry           ✗ heading drifts over time
+  </div>
+  <p>Wheel odometry alone drifts in heading (especially on skid-steer). AMCL provides map-level correction but at low rate. There is no mid-rate heading correction between wheel ticks.</p>
+</div>
+
+<h2>Proposed Solution</h2>
+
+<div class="card pending">
+  <p>Insert a <code>robot_localization</code> EKF between the diff_drive controller and Nav2, fusing three parallel sensor streams:</p>
+
+  <div class="diagram">
+    BEFORE                              AFTER
+    ┌──────────────────────┐            ┌──────────────────────────┐
+    │                      │            │  AMCL ──► map→odom      │
+    │  AMCL ──► map→odom   │            │                          │
+    │                      │            │  diff_drive ──┐          │
+    │  diff_drive ──►      │            │  ZED IMU ─────┤          │
+    │    Nav2 (raw odom)   │            │               ├──► EKF ──┤
+    │                      │            │  ArUco yaw ───┘  /odom   │
+    │  odom→base_footprint:│            │                  /filtered│
+    │    diff_drive pub    │            │                    │      │
+    │                      │            │                Nav2      │
+    └──────────────────────┘            │  odom→base_footprint:     │
+                                         │    EKF publishes         │
+                                         │    diff_drive: disable TF│
+                                         └──────────────────────────┘
+  </div>
+
+  <h3>Three-Input EKF Fusion</h3>
+
+  <table>
+    <tr><th>Input</th><th>Topic</th><th>Fused states</th><th>Role</th></tr>
+    <tr><td><code>odom0</code></td><td><code>/diff_drive_controller/odom</code></td><td>x, y, vx, vy, v_yaw</td><td>Primary motion backbone (~50 Hz)</td></tr>
+    <tr><td><code>imu0</code></td><td><code>/zed/zed_node/imu/data</code></td><td>roll, pitch, v_roll, v_pitch, v_yaw</td><td>Roll/pitch stabilization + 400 Hz angular velocity damps vibration</td></tr>
+    <tr><td><code>pose0</code></td><td><code>/aruco/attitude</code></td><td>yaw only (dynamic cov)</td><td>Visual drift correction — weighted by confidence</td></tr>
+  </table>
+</div>
+
+<h2>The Attitude Node (New)</h2>
+
+<div class="card pending">
+  <p><strong><code>attitude_node.py</code></strong> — A Python ROS 2 node that computes differential yaw from wall-mounted ArUco markers. It lives in the existing <code>aruco_detection</code> package.</p>
+
+  <p><strong>Inputs:</strong> <code>/aruco/markers</code> (PoseArray), <code>/aruco/marker_ids</code> (Int32MultiArray), <code>/odometry/filtered</code> (EKF yaw for latch reference)</p>
+  <p><strong>Output:</strong> <code>/aruco/attitude</code> (PoseWithCovarianceStamped, yaw-valid only)</p>
+  <p><strong>All base frames:</strong> <code>base_footprint</code> (already used by AMCL, costmaps, diff_drive)</p>
+
+  <h3>Data Flow</h3>
+
+  <div class="step"><span class="num">1</span> Subscribe to all three inputs</div>
+  <div class="step"><span class="num">2</span> Look up <code>zed_camera_link → base_footprint</code> TF (cached)</div>
+  <div class="step"><span class="num">3</span> For each marker: rvec → rotation matrix → wall normal → <code>psi = atan2(normal.y, normal.x)</code> in <code>base_footprint</code></div>
+  <div class="step"><span class="num">4</span> <strong>Latch:</strong> if not latched (first detect OR loss &gt; 0.5 s): store <code>psi_ref = circular_mean(all psi)</code>, <code>yaw_ref = latest EKF yaw</code></div>
+  <div class="step"><span class="num">5</span> <strong>Differential yaw:</strong> <code>yaw_obs = yaw_ref + circular_delta(psi_mean − psi_ref)</code> — no absolute azimuth</div>
+  <div class="step"><span class="num">6</span> <strong>Inter-marker check:</strong> reject frame if |psi_i − psi_j| &gt; <code>yaw_threshold</code></div>
+  <div class="step"><span class="num">7</span> <strong>Jump rejection:</strong> reject if |yaw_obs − last_published| &gt; <code>jump_threshold</code></div>
+  <div class="step"><span class="num">8</span> <strong>Dynamic covariance:</strong> rolling window N → stddev → clamp(min_cov, max_cov) → covariance[35]</div>
+  <div class="step"><span class="num">9</span> Publish <code>/aruco/attitude</code></div>
+  <div class="step"><span class="num">10</span> <strong>Loss recovery:</strong> no markers &gt; 0.5 s → reset latch → re-latch on next detection</div>
+</div>
+
+<h2>Config Files</h2>
+
+<div class="grid">
+  <div class="card pending">
+    <h3><code>attitude_params.yaml</code></h3>
+    <pre><code>aruco_attitude_node:
+  ros__parameters:
+    marker_frame: zed_camera_link
+    base_frame: base_footprint
+    ekf_odom_topic: /odometry/filtered
+    yaw_threshold: 10.0
+    jump_threshold: 15.0
+    loss_timeout: 0.5
+    temporal_window: 20
+    min_yaw_stddev: 0.5
+    max_yaw_stddev: 20.0
+    hz: 20.0
+    queue_size: 10
+    valid_marker_ids: [0, 1, 42]</code></pre>
+  </div>
+  <div class="card pending">
+    <h3><code>ekf_params.yaml</code></h3>
+    <pre><code>ekf_filter_node:
+  odom0: /diff_drive_controller/odom
+  odom0_config: [true, true, false, false, false, false,
+                 false, false, false, false, false, false,
+                 true, true, true]
+  odom0_differential: false
+
+  imu0: /zed/zed_node/imu/data
+  imu0_config: [false, false, false, true, true, false,
+                false, false, false, false, false, false,
+                true, true, true]
+  imu0_remove_gravitational_acceleration: true
+
+  pose0: /aruco/attitude
+  pose0_config: [false, false, false, false, false, true,
+                 false, false, false, false, false, false,
+                 false, false, false]
+  pose0_differential: false
+
+  map_frame: map
+  odom_frame: odom
+  world_frame: odom
+  two_d_mode: false
+  predict_to_current_time: true</code></pre>
+  </div>
+</div>
+
+<h2>Config Changes to Existing Files</h2>
+
+<table>
+  <tr><th>File</th><th>Change</th><th>Why</th></tr>
+  <tr>
+    <td><code>diff_drive_controller.yaml</code></td>
+    <td><code>enable_odom_tf: false</code></td>
+    <td>Only one node can publish <code>odom→base_footprint</code>. EKF owns it.</td>
+  </tr>
+  <tr>
+    <td><code>nav2_params_rover.yaml</code><br>(bt_navigator)</td>
+    <td><code>odom_topic: /odometry/filtered</code><br>(was <code>/diff_drive_controller/odom</code>)</td>
+    <td>Nav2 must consume fused odometry, not raw wheel odom.</td>
+  </tr>
+  <tr>
+    <td><code>nav2_params_rover.yaml</code><br>(velocity_smoother)</td>
+    <td><code>odom_topic: /odometry/filtered</code><br>(was <code>/diff_drive_controller/odom</code>)</td>
+    <td>Velocity smoother reads filtered twist.</td>
+  </tr>
+</table>
+
+<h2>Vibration Robustness</h2>
+
+<div class="card pending">
+  <p>The ZED IMU is sensitive to chassis vibration on rough terrain. Three mitigations:</p>
+  <ol>
+    <li><strong>EWMA low-pass filter</strong> on IMU angular velocity in EKF config</li>
+    <li><strong><code>sigmas</code> tuned above spec</strong> — real-world noise &gt; spec sheet values</li>
+    <li><strong>Dynamic ArUco covariance</strong> — when vibration causes jump rejections, covariance rises → EKF naturally trusts visual input less → relies more on IMU + wheel odometry</li>
+  </ol>
+  <p><strong>IMU frame check:</strong> Run <code>tf2_echo zed_camera_link zed_imu_link</code> to verify alignment. Set <code>imu0_remove_gravitational_acceleration: true</code> if gravity is present in IMU data.</p>
+</div>
+
+<h2>New / Changed Files</h2>
+
+<table>
+  <tr><th>File</th><th>Action</th></tr>
+  <tr><td><code>src/aruco_detection/aruco_detection/attitude_node.py</code></td><td><span class="tag tag-todo">CREATE</span></td></tr>
+  <tr><td><code>src/aruco_detection/config/attitude_params.yaml</code></td><td><span class="tag tag-todo">CREATE</span></td></tr>
+  <tr><td><code>src/aruco_detection/launch/yaw_correction.launch.py</code></td><td><span class="tag tag-todo">CREATE</span></td></tr>
+  <tr><td><code>config/ekf_params.yaml</code></td><td><span class="tag tag-todo">CREATE</span></td></tr>
+  <tr><td><code>src/my_robot_bringup/config/diff_drive_controller.yaml</code></td><td><span class="tag tag-todo">EDIT</span> — add <code>enable_odom_tf: false</code></td></tr>
+  <tr><td><code>src/my_robot_bringup/config/nav2_params_rover.yaml</code></td><td><span class="tag tag-todo">EDIT</span> — redirect <code>odom_topic</code></td></tr>
+</table>
+
+<h2>Implementation Order</h2>
+
+<div class="card pending">
+  <ol>
+    <li><strong>attitude_node.py</strong> — differential-yaw node with loss timeout, jump rejection, dynamic covariance</li>
+    <li><strong>attitude_params.yaml</strong> — thresholds, marker whitelist, frame IDs</li>
+    <li><strong>yaw_correction.launch.py</strong> — standalone launch for attitude node</li>
+    <li><strong>ekf_params.yaml</strong> — three-sensor fusion config</li>
+    <li><strong>Edit diff_drive_controller.yaml</strong> — <code>enable_odom_tf: false</code></li>
+    <li><strong>Edit nav2_params_rover.yaml</strong> — <code>odom_topic: /odometry/filtered</code></li>
+    <li><strong>Bringup integration</strong> — include yaw_correction + EKF in top-level launch</li>
+    <li><strong>Integration test</strong> — verify TF chain, yaw correction during manual rotation</li>
+  </ol>
+</div>
+
+<h2>Existing Stack (Unchanged)</h2>
+
+<div class="card info">
+  <p>The following already works and is <strong>not modified</strong> by Phase 2b:</p>
+  <table>
+    <tr><th>Component</th><th>How it runs</th></tr>
+    <tr><td>AMCL laser map localization</td><td><code>/zed/scan</code> → AMCL → <code>map→odom</code> TF</td></tr>
+    <tr><td>diff_drive_controller</td><td>Publishes wheel odom &amp; cmd_vel; <em>only</em> loses TF publishing</td></tr>
+    <tr><td>detection_node.py (Phase 2a)</td><td>ZED → <code>/aruco/markers</code> — already deployed</td></tr>
+    <tr><td>Nav2 path planning + control</td><td>Controller, costmaps, planners</td></tr>
+  </table>
+</div>
+
+<div class="meta">
+  RoverTech Nav2 · ROS 2 Humble · <code>Aruco_plan.html</code> (full plan) · Drafted 2026-07-24
+</div>
+
+</body>
+</html>

@@ -9,6 +9,7 @@
 /home/RoverTech/nav2_ws_new/install/my_robot_bringup/share/my_robot_bringup//config/glm_controller.yaml
 /home/RoverTech/nav2_ws_new/install/my_robot_bringup/share/my_robot_bringup//config/SIM2015D_slave_config_gem.yaml
 /home/RoverTech/nav2_ws_new/install/my_robot_bringup/share/my_robot_bringup//config/my_robot_controller.yaml
+/home/RoverTech/nav2_ws_new/install/my_robot_bringup/share/my_robot_bringup//config/ekf_params.yaml
 /home/RoverTech/nav2_ws_new/install/my_robot_bringup/share/my_robot_bringup//config/pointcloud_to_laserscan_nav2.yaml
 /home/RoverTech/nav2_ws_new/install/my_robot_bringup/share/my_robot_bringup//launch/teleop_command.txt
 /home/RoverTech/nav2_ws_new/install/my_robot_bringup/share/my_robot_bringup//launch/nav2_mapping.launch.py
