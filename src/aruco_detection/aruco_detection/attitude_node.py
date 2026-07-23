@@ -1,3 +1,4 @@
+import itertools
 import json
 import math
 import numpy as np
@@ -8,6 +9,9 @@ from rclpy.node import Node
 from geometry_msgs.msg import PoseArray, PoseWithCovarianceStamped
 from std_msgs.msg import Int32MultiArray, Float64MultiArray
 from tf2_ros import Buffer, TransformListener, LookupException, ConnectivityException, ExtrapolationException
+
+
+_DEFAULT_PC_RATE_MAP = {0: 10.0, 1: 10.0, 2: 7.0, 3: 5.0, 4: 3.0}
 
 
 def _quat_to_normal_camera(px, py, pz, pw):
@@ -55,7 +59,6 @@ class AttitudeNode(Node):
         self.declare_parameter("temporal_window", 20)
         self.declare_parameter("min_yaw_stddev", 0.5)
         self.declare_parameter("max_yaw_stddev", 20.0)
-        self.declare_parameter("hz", 20.0)
         self.declare_parameter("queue_size", 10)
         self.declare_parameter("valid_marker_ids", [0, 1, 42])
         self.declare_parameter("pointcloud_rate_map",
@@ -71,12 +74,15 @@ class AttitudeNode(Node):
         self._temporal_window = self.get_parameter("temporal_window").value
         self._min_yaw_stddev = self.get_parameter("min_yaw_stddev").value
         self._max_yaw_stddev = self.get_parameter("max_yaw_stddev").value
-        self._hz = self.get_parameter("hz").value
         self._queue_size = self.get_parameter("queue_size").value
         raw_valid = self.get_parameter("valid_marker_ids").value
         self._valid_ids = set(int(v) for v in raw_valid)
         raw_rate_map = self.get_parameter("pointcloud_rate_map").value
-        self._pc_rate_map = {int(k): float(v) for k, v in json.loads(raw_rate_map).items()}
+        try:
+            self._pc_rate_map = {int(k): float(v) for k, v in json.loads(raw_rate_map).items()}
+        except (json.JSONDecodeError, ValueError, TypeError):
+            self.get_logger().warn("Invalid pointcloud_rate_map, using defaults")
+            self._pc_rate_map = dict(_DEFAULT_PC_RATE_MAP)
         self._pc_update_interval = self.get_parameter("pointcloud_update_interval").value
 
         self._latched = False
@@ -103,6 +109,7 @@ class AttitudeNode(Node):
         self._latest_ids = None
         self._fallback_logged = False
 
+        self._pc_client = self.create_client(SetParameters, "/zed/zed_node/set_parameters")
         self._pc_timer = self.create_timer(self._pc_update_interval, self._pc_rate_callback)
 
         valid_str = ", ".join(str(v) for v in sorted(self._valid_ids))
@@ -181,7 +188,7 @@ class AttitudeNode(Node):
 
         if len(yaws) > 1:
             max_delta = max(abs(_normalize_angle_deg(a - b))
-                            for a in yaws for b in yaws if yaws.index(a) < yaws.index(b))
+                            for a, b in itertools.combinations(yaws, 2))
             if max_delta > self._yaw_threshold:
                 self.get_logger().warn(
                     f"Marker disagreement {max_delta:.1f}° > {self._yaw_threshold}° — skipping")
@@ -230,8 +237,7 @@ class AttitudeNode(Node):
 
     def _pc_rate_callback(self):
         rate = self._pc_rate_map.get(self._current_adaptive_mode, 10.0)
-        client = self.create_client(SetParameters, "/zed/zed_node/set_parameters")
-        if not client.wait_for_service(timeout_sec=0.2):
+        if not self._pc_client.wait_for_service(timeout_sec=0.2):
             return
         req = SetParameters.Request()
         param = Parameter()
@@ -239,7 +245,7 @@ class AttitudeNode(Node):
         param.value.type = Parameter.Type.DOUBLE
         param.value.double_value = rate
         req.parameters = [param]
-        future = client.call_async(req)
+        future = self._pc_client.call_async(req)
         future.add_done_callback(lambda f: None)
 
     def destroy_node(self):

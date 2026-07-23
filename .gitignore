@@ -20,3 +20,4 @@ build/.built_by
 build/.cmake/api/v1/query/client-neocmake/
 /build/rover_nav2_sim
 src/**/install/
+/build

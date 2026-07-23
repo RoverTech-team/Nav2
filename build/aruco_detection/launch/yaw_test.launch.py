@@ -1,1 +1,0 @@
-/home/RoverTech/nav2_ws_new/src/aruco_detection/launch/yaw_test.launch.py

@@ -1,9 +1,0 @@
-aruco_detection:
-  ros__parameters:
-    image_topic: /zed/zed_node/rgb/image_rect_color
-    camera_info_topic: /zed/zed_node/rgb/camera_info
-    marker_size: 0.15
-    aruco_dictionaries: ["DICT_6X6_250", "DICT_7X7_250"]
-    marker_frame: zed_camera_link
-    publish_rate: 10.0
-    publish_debug_image: true

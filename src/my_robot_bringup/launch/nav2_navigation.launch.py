@@ -2,7 +2,7 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, TimerAction
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
@@ -82,17 +82,12 @@ def generate_launch_description():
                 output="screen",
                 parameters=[attitude_params],
             ),
-            TimerAction(
-                period=3.0,
-                actions=[
-                    Node(
-                        package="robot_localization",
-                        executable="ekf_filter_node",
-                        name="ekf_filter_node",
-                        output="screen",
-                        parameters=[ekf_params],
-                    )
-                ],
+            Node(
+                package="robot_localization",
+                executable="ekf_filter_node",
+                name="ekf_filter_node",
+                output="screen",
+                parameters=[ekf_params],
             ),
             # ── Nav2 ──
             IncludeLaunchDescription(

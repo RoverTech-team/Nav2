@@ -1,1 +1,0 @@
-robot_state_publisher;controller_manager;joint_state_publisher_gui;my_robot_description;geometry_msgs;launch;launch_ros;nav2_bringup;nav2_map_server;pointcloud_to_laserscan;rclpy;rviz2;slam_toolbox;tf2_ros;xacro;zed_wrapper;robot_localization;ament_lint_auto;ament_lint_common
