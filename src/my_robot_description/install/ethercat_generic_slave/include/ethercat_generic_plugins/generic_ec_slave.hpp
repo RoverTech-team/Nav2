@@ -1,1 +1,0 @@
-/home/RoverTech/nav2_ws_new/src/ethercat_driver_ros2/ethercat_generic_plugins/ethercat_generic_slave/include/ethercat_generic_plugins/generic_ec_slave.hpp

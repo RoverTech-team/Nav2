@@ -1,2 +1,0 @@
-[console_scripts]
-detection_node = aruco_detection_dev.detection_node:main

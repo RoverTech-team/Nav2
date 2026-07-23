@@ -1,1 +1,0 @@
-/home/RoverTech/nav2_ws_new/build/ethercat_interface/ament_cmake_core/ethercat_interfaceConfig-version.cmake

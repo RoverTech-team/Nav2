@@ -1,1 +1,0 @@
-/home/RoverTech/nav2_ws_new/build/ethercat_msgs/rosidl_cmake/srv/SetSdo_Request.msg

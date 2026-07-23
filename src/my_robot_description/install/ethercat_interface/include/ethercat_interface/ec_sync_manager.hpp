@@ -1,1 +1,0 @@
-/home/RoverTech/nav2_ws_new/src/ethercat_driver_ros2/ethercat_interface/include/ethercat_interface/ec_sync_manager.hpp

@@ -1,1 +1,0 @@
-/home/RoverTech/nav2_ws_new/build/ethercat_msgs/rosidl_typesupport_introspection_cpp/ethercat_msgs/srv/detail/set_sdo__rosidl_typesupport_introspection_cpp.hpp

@@ -1,1 +1,0 @@
-/home/RoverTech/nav2_ws_new/build/ethercat_msgs/rosidl_typesupport_fastrtps_c/ethercat_msgs/srv/detail/get_sdo__rosidl_typesupport_fastrtps_c.h
