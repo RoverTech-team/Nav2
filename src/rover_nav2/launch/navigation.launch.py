@@ -22,6 +22,8 @@ def _numpy_compat_env():
         "/usr",
         "/home/RoverTech/ros2_humble",
         "/home/RoverTech/nav2_ws/install",
+        "/home/RoverTech/nav2_ws_new/install",
+        "/home/RoverTech/nav2_ws_new",
     )
 
     cleaned = [
@@ -88,9 +90,9 @@ def _navigation_nodes(params_file, condition):
     ]
 
 
-def _lifecycle_manager(node_names, condition):
+def _lifecycle_manager(node_names, condition, delay=18.0):
     return TimerAction(
-        period=18.0,
+        period=delay,
         actions=[
             Node(
                 package="nav2_lifecycle_manager",
@@ -116,22 +118,31 @@ def generate_launch_description():
     pointcloud_params = os.path.join(bringup_share, "config", "pointcloud_to_laserscan_nav2.yaml")
     slam_params = os.path.join(bringup_share, "config", "slam_toolbox_nav2.yaml")
     nav2_params = os.path.join(bringup_share, "config", "nav2_params_rover.yaml")
+    ekf_params = os.path.join(bringup_share, "config", "ekf_params.yaml")
+    aruco_share = get_package_share_directory("aruco_detection")
+    zed_params = os.path.join(aruco_share, "config", "zed_params.yaml")
+    attitude_params = os.path.join(aruco_share, "config", "attitude_params.yaml")
     rviz_config = os.path.join(nav2_share, "rviz", "nav2_default_view.rviz")
 
-    map_dir = os.path.join(os.path.expanduser("~"), "nav2_ws", "maps")
+    # FIX: handle both ws locations; prefer dir that actually contains a map
+    candidate_dirs = [
+        os.path.join(os.path.expanduser("~"), "nav2_ws_new", "maps"),
+        os.path.join(os.path.expanduser("~"), "nav2_ws", "maps"),
+        os.path.join(bringup_share, "maps"),
+    ]
+    map_dir = next((d for d in candidate_dirs if os.path.isdir(d) and os.listdir(d)), candidate_dirs[0])
     os.makedirs(map_dir, exist_ok=True)
     default_map = os.path.join(map_dir, "rover_real_map.yaml")
+    if not os.path.isfile(default_map):
+        print(f"[navigation.launch.py] WARNING: default map not found at {default_map}")
 
     mapping_mode = LaunchConfiguration("generate_new_map")
     mapping_condition = IfCondition(mapping_mode)
     localization_condition = UnlessCondition(mapping_mode)
     auto_save_condition = IfCondition(
         PythonExpression([
-            '"',
-            LaunchConfiguration("generate_new_map"),
-            '".lower() == "true" and "',
-            LaunchConfiguration("auto_save_map"),
-            '".lower() == "true"',
+            "'", LaunchConfiguration("generate_new_map"), "' == 'true' and '",
+            LaunchConfiguration("auto_save_map"), "' == 'true'"
         ])
     )
 
@@ -145,6 +156,33 @@ def generate_launch_description():
         "velocity_smoother",
     ]
     localization_nodes = ["map_server", "amcl", *mapping_nodes]
+
+    # ── Phase 2b: ArUco detection → attitude (Kalman-filtered yaw) → EKF fusion ──
+    aruco_nodes = [
+        Node(
+            package="aruco_detection",
+            executable="detection_node",
+            name="aruco_detection_node",
+            output="screen",
+            parameters=[zed_params],
+            additional_env=_NUMPY_COMPAT_ENV,
+        ),
+        Node(
+            package="aruco_detection",
+            executable="attitude_node",
+            name="aruco_attitude_node",
+            output="screen",
+            parameters=[attitude_params],
+            additional_env=_NUMPY_COMPAT_ENV,
+        ),
+        Node(
+            package="robot_localization",
+            executable="ekf_node",
+            name="ekf_filter_node",
+            output="screen",
+            parameters=[ekf_params],
+        ),
+    ]
 
     return LaunchDescription(
         [
@@ -186,6 +224,14 @@ def generate_launch_description():
                     ("cloud_in", LaunchConfiguration("pointcloud_topic")),
                     ("scan", LaunchConfiguration("scan_topic")),
                 ],
+            ),
+            *aruco_nodes,
+            Node(
+                package="tf2_ros",
+                executable="static_transform_publisher",
+                name="static_map_to_odom",
+                arguments=["0", "0", "0", "0", "0", "0", "map", "odom"],
+                condition=mapping_condition,
             ),
             Node(
                 package="slam_toolbox",
@@ -233,7 +279,7 @@ def generate_launch_description():
                 condition=auto_save_condition,
             ),
             *_navigation_nodes(nav2_params, mapping_condition),
-            _lifecycle_manager(mapping_nodes, mapping_condition),
+            _lifecycle_manager(mapping_nodes, mapping_condition, 35.0),
             TimerAction(
                 period=0.1,
                 actions=[
@@ -263,7 +309,7 @@ def generate_launch_description():
                 output="screen",
                 arguments=["-d", rviz_config],
                 parameters=[{"use_sim_time": False}],
-                condition=IfCondition(LaunchConfiguration("use_rviz")),
+                additional_env={"DISPLAY": os.environ.get("DISPLAY", ":1")},
             ),
         ]
     )

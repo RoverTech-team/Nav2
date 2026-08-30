@@ -21,3 +21,9 @@ build/.cmake/api/v1/query/client-neocmake/
 /build/rover_nav2_sim
 src/**/install/
 /build
+log/latest
+log/latest_build
+__pycache__/
+*.pyc
+*.pyo
+*.pycache/

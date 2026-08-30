@@ -32,12 +32,15 @@ ekf_filter_node:
     # ── Frames ──
     map_frame: map
     odom_frame: odom
+    base_link_frame: base_footprint
     world_frame: odom
 
     # ── General ──
-    two_d_mode: false
+    two_d_mode: true
     predict_to_current_time: true
     publish_tf: true
     print_diagnostics: true
-    frequency: 50.0
+    frequency: 30.0
+    transform_time_offset: 0.0
+    transform_timeout: 0.05
     debug: false

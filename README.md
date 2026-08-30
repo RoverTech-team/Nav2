@@ -9,6 +9,8 @@ ROS 2 Humble autonomous navigation stack for a 6-wheel skid-steer rover with rea
 - **ZED 2i → SLAM pipeline**: point cloud → laser scan → `slam_toolbox` (Ceres solver, loop closure, 0.05m resolution)
 - **Dual-mode operation**: SLAM mapping or map-based AMCL localization, selected at launch
 - **Two launch systems**: simple single-purpose launches (`my_robot_bringup`) or advanced dual-mode orchestrator (`rover_nav2`) with timed lifecycle staging and auto map saving
+- **ArUco absolute yaw correction**: ZED 2i marker detection → 1-D Kalman filter (`yaw_kalman.py`) → `/aruco/attitude` fused by `robot_localization` EKF as drift-correcting heading
+- **Marker-based approach**: `marker_navigator` drives to a target ArUco id via Nav2 actions (search/approach/stop) with `aruco_approach.launch.py`
 - **Triple-enforced safety limits**: velocity clamped to ±0.25 m/s linear, ±0.50 rad/s angular with command timeout fallback
 
 ## Hardware Requirements
@@ -74,8 +76,9 @@ Nav2 → /cmd_vel (Twist)
 |---------|-------------|
 | `ethercat_driver_ros2/` | IgH EtherCAT master wrapper, ros2_control `SystemInterface` plugin, CiA 402 drive profile, generic slave plugin, SDO service definitions |
 | `my_robot_description/` | URDF/XACRO model: 6-wheel chassis, ZED camera mast, mock & real ros2_control hardware configs |
-| `my_robot_bringup/` | Launch files, Nav2 params, SLAM config, pointcloud→laserscan config, safety relay script, map saver watchdog |
-| `rover_nav2/` | Advanced dual-mode launch orchestrator with timed lifecycle staging |
+| `aruco_detection/` | ZED 2i ArUco detection (`detection_node`), attitude yaw correction (`attitude_node` + `yaw_kalman.py` 1-D KF, `yaw_correction.launch.py`) |
+| `my_robot_bringup/` | Launch files, Nav2 params, SLAM/EKF configs, pointcloud→laserscan, safety relay, map saver watchdog, `marker_navigator` + `brake_release` nodes |
+| `rover_nav2/` | Advanced dual-mode launch orchestrator with timed lifecycle staging, plus `aruco_approach.launch.py` (Nav2 + marker approach) |
 | `rover_nav2_sim/` | Separate colcon workspace for simulation (mock hardware) |
 
 ## Quick Start
@@ -142,6 +145,9 @@ ros2 launch rover_nav2 navigation.launch.py \
 | `config/slam_toolbox_nav2.yaml` | Ceres solver, 0.05m resolution, loop closure enabled |
 | `config/SIM2015D_slave_config_gem.yaml` | EtherCAT slave PDO mapping, SDO init sequence, velocity factors |
 | `config/pointcloud_to_laserscan_nav2.yaml` | ZED point cloud → laser scan conversion (angle range ±1.20 rad) |
+| `config/ekf_params.yaml` | `robot_localization` EKF: fuses wheel odom + ZED IMU + ArUco yaw (`/aruco/attitude`) → `/odometry/filtered` |
+| `config/attitude_params.yaml` (`aruco_detection`) | ArUco yaw KF tuning: process/measurement noise, gating, loss timeout (see below) |
+| `config/marker_navigator.yaml` | Marker approach: target id, stop distance/hysteresis, explore spin/step, timeouts |
 
 ### Key Tuning Parameters
 
@@ -164,6 +170,42 @@ Velocity limits are enforced at **three independent layers**:
 1. **`nav2_cmd_vel_relay.py`** — clamps incoming `/cmd_vel`, publishes zero on 0.5s timeout
 2. **`nav2_params_rover.yaml`** — DWB planner velocity/accel limits
 3. **`skid_steer_controller.yaml`** — diff_drive_controller acceleration limits
+
+## ArUco Yaw Correction & EKF Fusion
+
+`aruco_attitude_node` turns ZED marker detections into an **absolute yaw** fused by the `robot_localization` EKF as a drift-correcting heading (`/aruco/attitude`, `PoseWithCovarianceStamped`). See `src/aruco_detection/Readme.production.md` for the full reference.
+
+**Pipeline:**
+```
+ZED rgb/image_rect_color + camera_info
+  → detection_node (/aruco/markers, /aruco/marker_ids, /aruco/detection_status)
+    → attitude_node: per-marker wall-normal → base_footprint → psi=atan2(n.y,n.x)
+      → relative yaw vs first-seen psi_ref → 1-D Kalman filter (yaw_kalman.py) → /aruco/attitude
+        → EKF (/odometry/filtered, pose0) → Nav2 (odom_topic: /odometry/filtered)
+```
+
+**Kalman filter (`aruco_detection/yaw_kalman.py`):**
+- `predict(dt, Q)` grows `P` by process noise (larger `kf_loss_process_noise` while coasting during marker loss).
+- `update(yaw_obs, R)` with `R = (base_sigma + dist_coeff·distance/√count)²` from `/aruco/detection_status`; innovations gated by `gate_sigma`; `P` clamped to `[min_cov, max_cov]`.
+- Always-on 20 Hz predict timer: keeps publishing a coasting estimate during blackouts with growing covariance so the EKF de-weights it; after `loss_timeout` (2.5 s) hard re-latches/resets and goes silent until markers return — survives indefinite loss.
+
+**Key params (`config/attitude_params.yaml`):**
+
+| Parameter | Default | Notes |
+|---|---|---|
+| `kf_process_noise` | 0.01 rad²/s | Uncertainty growth while tracking |
+| `kf_loss_process_noise` | 0.05 rad²/s | Growth while coasting (no markers) |
+| `kf_meas_base_sigma_deg` | 1.0 deg | Floor measurement noise |
+| `kf_meas_dist_coeff` | 2.0 | Noise per metre of marker distance |
+| `kf_gate_sigma` | 3.0 | Innovation gate (std-devs) |
+| `kf_max_cov_deg` | 20.0 deg | Covariance ceiling (published cov saturates here while coasting) |
+| `kf_min_cov_deg` | 0.5 deg | Covariance floor |
+| `loss_timeout` | 2.5 s | Blackout → reset and silence |
+| `yaw_threshold` | 10.0 deg | Inter-marker agreement reject |
+
+**Launch:** `ros2 launch aruco_detection yaw_correction.launch.py` standalone, or via the full stack (`ros2 launch my_robot_bringup nav2_navigation.launch.py` / `ros2 launch rover_nav2 navigation.launch.py` which now include detection + attitude + EKF). The EKF is launched automatically in navigation (see `config/ekf_params.yaml`: `odom0` diff-drive odom, `imu0` ZED IMU, `pose0` ArUco yaw).
+
+**Marker approach:** `ros2 launch rover_nav2 aruco_approach.launch.py marker_id:=42` — starts the dual-mode Nav2 stack then (after ~20 s staging) `marker_navigator_node` (via `my_robot_bringup`) which state-machines SEARCH (spin full turn + step forward) / APPROACH (refreshing `NavigateToPose` pulled back `stop_distance` from marker) / STOP / IDLE entirely through Nav2 actions, so costmaps and the velocity relay stay intact.
 
 ## EtherCAT Driver Stack
 

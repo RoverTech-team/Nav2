@@ -3,15 +3,17 @@ import json
 import math
 import numpy as np
 import rclpy
-from rcl_interfaces.msg import Parameter
 from rcl_interfaces.srv import SetParameters
 from rclpy.node import Node
 from geometry_msgs.msg import PoseArray, PoseWithCovarianceStamped
 from std_msgs.msg import Int32MultiArray, Float64MultiArray
 from tf2_ros import Buffer, TransformListener, LookupException, ConnectivityException, ExtrapolationException
 
+from aruco_detection.yaw_kalman import YawKalmanFilter
+
 
 _DEFAULT_PC_RATE_MAP = {0: 10.0, 1: 10.0, 2: 7.0, 3: 5.0, 4: 3.0}
+_PREDICT_HZ = 20.0
 
 
 def _quat_to_normal_camera(px, py, pz, pw):
@@ -54,27 +56,29 @@ class AttitudeNode(Node):
         self.declare_parameter("marker_frame", "zed_camera_link")
         self.declare_parameter("base_frame", "base_footprint")
         self.declare_parameter("yaw_threshold", 10.0)
-        self.declare_parameter("jump_threshold", 15.0)
-        self.declare_parameter("loss_timeout", 0.5)
-        self.declare_parameter("temporal_window", 20)
-        self.declare_parameter("min_yaw_stddev", 0.5)
-        self.declare_parameter("max_yaw_stddev", 20.0)
+        self.declare_parameter("loss_timeout", 2.5)
         self.declare_parameter("queue_size", 10)
         self.declare_parameter("valid_marker_ids", [0, 1, 42])
         self.declare_parameter("pointcloud_rate_map",
             '{"0": 10.0, "1": 10.0, "2": 7.0, "3": 5.0, "4": 3.0}')
         self.declare_parameter("pointcloud_update_interval", 3.0)
+        # Kalman filter parameters
+        self.declare_parameter("kf_process_noise", 0.01)        # rad^2 / s (tracking)
+        self.declare_parameter("kf_loss_process_noise", 0.05)   # rad^2 / s (coasting)
+        self.declare_parameter("kf_meas_base_sigma_deg", 1.0)   # floor measurement noise
+        self.declare_parameter("kf_meas_dist_coeff", 2.0)       # deg per metre
+        self.declare_parameter("kf_gate_sigma", 3.0)            # innovation gate (std-devs)
+        self.declare_parameter("kf_max_cov_deg", 20.0)          # reset threshold
+        self.declare_parameter("kf_min_cov_deg", 0.5)           # covariance floor
+        self.declare_parameter("kf_default_distance", 2.0)      # m, used when unknown
 
         self._marker_frame = self.get_parameter("marker_frame").value
         self._base_frame = self.get_parameter("base_frame").value
         self._yaw_threshold = self.get_parameter("yaw_threshold").value
-        self._jump_threshold = self.get_parameter("jump_threshold").value
         self._loss_timeout = rclpy.duration.Duration(
             seconds=self.get_parameter("loss_timeout").value)
-        self._temporal_window = self.get_parameter("temporal_window").value
-        self._min_yaw_stddev = self.get_parameter("min_yaw_stddev").value
-        self._max_yaw_stddev = self.get_parameter("max_yaw_stddev").value
         self._queue_size = self.get_parameter("queue_size").value
+        self._loss_Q = self.get_parameter("kf_loss_process_noise").value
         raw_valid = self.get_parameter("valid_marker_ids").value
         self._valid_ids = set(int(v) for v in raw_valid)
         raw_rate_map = self.get_parameter("pointcloud_rate_map").value
@@ -85,13 +89,26 @@ class AttitudeNode(Node):
             self._pc_rate_map = dict(_DEFAULT_PC_RATE_MAP)
         self._pc_update_interval = self.get_parameter("pointcloud_update_interval").value
 
+        # Kalman filter over the visual yaw
+        self._kf = YawKalmanFilter(
+            process_noise=self.get_parameter("kf_process_noise").value,
+            gate_sigma=self.get_parameter("kf_gate_sigma").value,
+            max_cov_deg=self.get_parameter("kf_max_cov_deg").value,
+            min_cov_deg=self.get_parameter("kf_min_cov_deg").value,
+        )
+        self._meas_base_sigma = self.get_parameter("kf_meas_base_sigma_deg").value
+        self._meas_dist_coeff = self.get_parameter("kf_meas_dist_coeff").value
+        self._default_distance = self.get_parameter("kf_default_distance").value
+
         self._latched = False
         self._psi_ref = 0.0
-        self._yaw_ref = 0.0
-        self._last_published_yaw = None
         self._last_detection_time = self.get_clock().now()
-        self._yaw_history = []
+        self._last_predict_time = self.get_clock().now()
+        self._latest_ids = None
+        self._latest_distance = 0.0
+        self._latest_count = 0
         self._current_adaptive_mode = 0
+        self._fallback_logged = False
 
         self._tf_buffer = Buffer()
         self._tf_listener = TransformListener(self._tf_buffer, self)
@@ -106,27 +123,27 @@ class AttitudeNode(Node):
         self._status_sub = self.create_subscription(
             Float64MultiArray, "/aruco/detection_status", self._status_callback, self._queue_size)
 
-        self._latest_ids = None
-        self._fallback_logged = False
-
         self._pc_client = self.create_client(SetParameters, "/zed/zed_node/set_parameters")
         self._pc_timer = self.create_timer(self._pc_update_interval, self._pc_rate_callback)
+        self._predict_timer = self.create_timer(1.0 / _PREDICT_HZ, self._predict_callback)
 
         valid_str = ", ".join(str(v) for v in sorted(self._valid_ids))
-        rates_str = ", ".join(f"mode{k}={v}Hz" for k, v in sorted(self._pc_rate_map.items()))
         self.get_logger().info(
-            f"Attitude node started — base={self._base_frame}, "
+            f"Attitude node started (Kalman-filtered) — base={self._base_frame}, "
             f"valid_ids=[{valid_str}], yaw_threshold={self._yaw_threshold}deg, "
-            f"jump_threshold={self._jump_threshold}deg, "
-            f"loss_timeout={self._loss_timeout.nanoseconds*1e-9:.1f}s, "
-            f"pc_rate_map={{{rates_str}}}"
+            f"kf_process_noise={self.get_parameter('kf_process_noise').value}rad^2/s, "
+            f"kf_gate_sigma={self._kf._gate_sigma}"
         )
 
     def _ids_callback(self, msg):
         self._latest_ids = msg.data
 
     def _status_callback(self, msg):
+        if len(msg.data) < 6:
+            return
         self._current_adaptive_mode = int(msg.data[2])
+        self._latest_count = int(msg.data[4])
+        self._latest_distance = float(msg.data[5])
 
     def _get_tf(self):
         try:
@@ -140,6 +157,45 @@ class AttitudeNode(Node):
                 self.get_logger().warn("Using identity transform as fallback")
                 self._fallback_logged = True
             return None
+
+    def _publish_attitude(self, now):
+        msg_out = PoseWithCovarianceStamped()
+        msg_out.header.stamp = now.to_msg()
+        msg_out.header.frame_id = "odom"
+        yaw_rad = self._kf.state
+        msg_out.pose.pose.orientation.x = 0.0
+        msg_out.pose.pose.orientation.y = 0.0
+        msg_out.pose.pose.orientation.z = math.sin(yaw_rad * 0.5)
+        msg_out.pose.pose.orientation.w = math.cos(yaw_rad * 0.5)
+        msg_out.pose.covariance[35] = self._kf.publishable_covariance()
+        self._pub.publish(msg_out)
+
+    def _predict_callback(self):
+        now = self.get_clock().now()
+        dt = (now - self._last_predict_time).nanoseconds * 1e-9
+        self._last_predict_time = now
+        if dt <= 0.0 or dt > 1.0:
+            dt = 1.0 / _PREDICT_HZ
+
+        time_since = (now - self._last_detection_time).nanoseconds * 1e-9
+        coasting = time_since > 0.15
+
+        # Grow uncertainty faster while coasting (no fresh markers).
+        self._kf.predict(dt, self._loss_Q if coasting else None)
+
+        # Keep publishing a coasting estimate during a marker blackout so the
+        # downstream EKF can de-weight it via the (growing) covariance.
+        if self._kf.initialized and 0.15 < time_since <= self._loss_timeout.nanoseconds * 1e-9:
+            self._publish_attitude(now)
+
+        # Hard re-latch once the loss timeout elapses: drop the stale estimate
+        # and wait silently for markers to return.
+        if time_since > self._loss_timeout.nanoseconds * 1e-9 and self._latched:
+            self._latched = False
+            self._psi_ref = 0.0
+            self._kf.reset()
+            self.get_logger().info(
+                f"Long marker loss — re-latch/reset after {time_since:.1f}s")
 
     def _markers_callback(self, msg):
         if self._latest_ids is None:
@@ -178,13 +234,12 @@ class AttitudeNode(Node):
             yaws.append(psi)
 
         if not yaws:
-            time_since_detection = (now - self._last_detection_time).nanoseconds * 1e-9
-            if time_since_detection > self._loss_timeout.nanoseconds * 1e-9 and self._latched:
-                self._latched = False
-                self._yaw_history.clear()
-                self.get_logger().info(
-                    f"Latch released — no markers for {time_since_detection:.1f}s")
+            # No usable markers this frame; the predict timer owns the
+            # coasting/reset logic, so just return here.
             return
+
+        # We have at least one valid marker this frame
+        self._last_detection_time = now
 
         if len(yaws) > 1:
             max_delta = max(abs(_normalize_angle_deg(a - b))
@@ -194,52 +249,37 @@ class AttitudeNode(Node):
                     f"Marker disagreement {max_delta:.1f}° > {self._yaw_threshold}° — skipping")
                 return
 
+        psi_mean = _circular_mean_deg(yaws)
+
         if not self._latched:
-            self._psi_ref = _circular_mean_deg(yaws)
-            self._yaw_ref = 0.0
+            self._psi_ref = psi_mean
             self._latched = True
-            self._last_detection_time = now
             self.get_logger().info(
-                f"Latch established — psi_ref={self._psi_ref:.1f}°, yaw_ref=0.0°")
+                f"Reference established — psi_ref={self._psi_ref:.1f}°")
+            yaw_obs_deg = 0.0
+        else:
+            yaw_obs_deg = _normalize_angle_deg(psi_mean - self._psi_ref)
+
+        # Measurement noise grows with marker distance, shrinks with count.
+        dist = self._latest_distance if self._latest_distance > 0.0 else self._default_distance
+        count = self._latest_count if self._latest_count > 0 else 1
+        sigma_deg = self._meas_base_sigma + self._meas_dist_coeff * dist / math.sqrt(count)
+        R = math.radians(sigma_deg) ** 2
+
+        accepted = self._kf.update(math.radians(yaw_obs_deg), R)
+        if not accepted:
+            self.get_logger().warn(
+                f"Kalman gate rejected innovation (sigma={sigma_deg:.1f}°)")
             return
 
-        psi_mean = _circular_mean_deg(yaws)
-        yaw_obs = self._yaw_ref + _normalize_angle_deg(psi_mean - self._psi_ref)
-
-        if self._last_published_yaw is not None:
-            jump = abs(_normalize_angle_deg(yaw_obs - self._last_published_yaw))
-            if jump > self._jump_threshold:
-                self.get_logger().warn(
-                    f"Jump rejected {jump:.1f}° > {self._jump_threshold}°")
-                return
-
-        self._last_detection_time = now
-        self._yaw_history.append(yaw_obs)
-        if len(self._yaw_history) > self._temporal_window:
-            self._yaw_history.pop(0)
-        self._last_published_yaw = yaw_obs
-
-        stddev = float(np.std(self._yaw_history)) if len(self._yaw_history) > 1 else self._max_yaw_stddev
-        stddev = max(self._min_yaw_stddev, min(self._max_yaw_stddev, stddev))
-        cov = (stddev * math.pi / 180.0) ** 2
-
-        msg_out = PoseWithCovarianceStamped()
-        msg_out.header.stamp = now.to_msg()
-        msg_out.header.frame_id = "odom"
-        yaw_rad = math.radians(yaw_obs)
-        msg_out.pose.pose.orientation.x = 0.0
-        msg_out.pose.pose.orientation.y = 0.0
-        msg_out.pose.pose.orientation.z = math.sin(yaw_rad * 0.5)
-        msg_out.pose.pose.orientation.w = math.cos(yaw_rad * 0.5)
-        msg_out.pose.covariance[35] = cov
-
-        self._pub.publish(msg_out)
+        self._publish_attitude(now)
 
     def _pc_rate_callback(self):
         rate = self._pc_rate_map.get(self._current_adaptive_mode, 10.0)
         if not self._pc_client.wait_for_service(timeout_sec=0.2):
             return
         req = SetParameters.Request()
+        from rcl_interfaces.msg import Parameter
         param = Parameter()
         param.name = "depth.point_cloud_freq"
         param.value.type = Parameter.Type.DOUBLE
@@ -251,6 +291,8 @@ class AttitudeNode(Node):
     def destroy_node(self):
         if hasattr(self, '_pc_timer'):
             self._pc_timer.cancel()
+        if hasattr(self, '_predict_timer'):
+            self._predict_timer.cancel()
         super().destroy_node()
 
 

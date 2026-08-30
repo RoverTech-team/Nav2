@@ -1,0 +1,17 @@
+marker_navigator_node:
+  ros__parameters:
+    target_marker_id: 42        # overridden by the launch `marker_id` argument
+    stop_distance: 0.5          # m — stop when the marker is closer than this
+    footprint_margin: 0.0       # m — add ~0.3 to stop on body-edge distance instead
+    stop_hysteresis: 0.6        # m — must exceed stop_distance to resume APPROACH
+    goal_refresh_period: 1.0    # s — cancel+resend cadence for the approach goal
+    marker_stale_time: 0.5      # s — older observations count as lost
+    loss_timeout: 1.0           # s — marker loss before abandoning the approach
+    min_markers_seen: 1         # frames required before trusting a detection
+    rotate_speed: 0.3           # rad/s — used for the Spin time allowance
+    explore_step: 0.5           # m per DriveOnHeading step
+    explore_timeout: 120.0      # s — give up exploring and go IDLE
+    spin_full_turn: 6.283       # rad — one full revolution per search spin
+    base_frame: base_footprint
+    camera_frame: zed_camera_link
+    global_frame: map
