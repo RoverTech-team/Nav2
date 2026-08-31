@@ -21,6 +21,7 @@ install(
     scripts/nav2_cmd_vel_relay.py
     scripts/map_saver_watchdog.py
     scripts/marker_navigator_node.py
+    scripts/brake_release_node.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
