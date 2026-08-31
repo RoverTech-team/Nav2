@@ -124,15 +124,23 @@ def generate_launch_description():
     attitude_params = os.path.join(aruco_share, "config", "attitude_params.yaml")
     rviz_config = os.path.join(nav2_share, "rviz", "nav2_default_view.rviz")
 
-    # FIX: handle both ws locations; prefer dir that actually contains a map
+    # FIX: handle both ws locations; prefer file that actually exists
     candidate_dirs = [
         os.path.join(os.path.expanduser("~"), "nav2_ws_new", "maps"),
         os.path.join(os.path.expanduser("~"), "nav2_ws", "maps"),
         os.path.join(bringup_share, "maps"),
     ]
-    map_dir = next((d for d in candidate_dirs if os.path.isdir(d) and os.listdir(d)), candidate_dirs[0])
-    os.makedirs(map_dir, exist_ok=True)
-    default_map = os.path.join(map_dir, "rover_real_map.yaml")
+    default_map = None
+    for d in candidate_dirs:
+        candidate = os.path.join(d, "rover_real_map.yaml")
+        if os.path.isfile(candidate):
+            default_map = candidate
+            map_dir = d
+            break
+    if default_map is None:
+        map_dir = next((d for d in candidate_dirs if os.path.isdir(d) and os.listdir(d)), candidate_dirs[0])
+        os.makedirs(map_dir, exist_ok=True)
+        default_map = os.path.join(map_dir, "rover_real_map.yaml")
     if not os.path.isfile(default_map):
         print(f"[navigation.launch.py] WARNING: default map not found at {default_map}")
 

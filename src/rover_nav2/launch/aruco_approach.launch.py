@@ -17,6 +17,11 @@ def _default_map():
         os.path.join(os.path.expanduser("~"), "nav2_ws", "maps"),
         os.path.join(bringup_share, "maps"),
     ]
+    for d in candidate_dirs:
+        candidate = os.path.join(d, "rover_real_map.yaml")
+        if os.path.isfile(candidate):
+            return candidate
+    # Fallback: first dir that exists and is non-empty, or first candidate
     map_dir = next((d for d in candidate_dirs if os.path.isdir(d) and os.listdir(d)), candidate_dirs[0])
     return os.path.join(map_dir, "rover_real_map.yaml")
 
