@@ -8,6 +8,9 @@ controller_manager:
     diff_drive_controller:
       type: diff_drive_controller/DiffDriveController
 
+    brake_release_controller:
+      type: forward_command_controller/ForwardCommandController
+
 diff_drive_controller:
   ros__parameters:
     left_wheel_names:
@@ -50,3 +53,14 @@ diff_drive_controller:
     position_feedback: false
     open_loop: false
     use_stamped_vel: true
+
+brake_release_controller:
+  ros__parameters:
+    joints:
+      - base_front_left_wheel_joint
+      - base_front_right_wheel_joint
+      - base_middle_left_wheel_joint
+      - base_middle_right_wheel_joint
+      - base_back_left_wheel_joint
+      - base_back_right_wheel_joint
+    interface_name: reset_fault

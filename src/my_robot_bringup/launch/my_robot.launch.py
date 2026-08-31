@@ -67,6 +67,32 @@ def generate_launch_description():
         	arguments=['diff_drive_controller'])]
     )
 
+    # Auto brake release: pulse reset_fault 1s on every launch, watchdog every 5s until OP_ENABLED
+    brake_release_controller_spawner = TimerAction(
+        period=6.5,
+        actions=[Node(
+            package='controller_manager',
+            executable='spawner',
+            arguments=['brake_release_controller', '--inactive'],
+        )]
+    )
+
+    brake_release_node = TimerAction(
+        period=7.0,
+        actions=[Node(
+            package='my_robot_bringup',
+            executable='brake_release_node.py',
+            name='brake_release_node',
+            output='screen',
+            parameters=[{
+                'pulse_duration': 1.0,
+                'repeat_interval': 5.0,
+                'auto_repeat': True,
+                'activate_controller': True,
+            }],
+        )]
+    )
+
     rviz2_node = Node(
         package="rviz2",
         executable="rviz2",
@@ -95,6 +121,8 @@ def generate_launch_description():
         joint_state_broadcaster_spawner,
         joint_state_publisher_gui_node,
         diff_drive_controller_spawner,
+        brake_release_controller_spawner,
+        brake_release_node,
         rviz2_node,
         zed_launch
     ])
