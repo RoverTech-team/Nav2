@@ -77,12 +77,18 @@ class BrakeReleaseNode(Node):
             result = future.result()
             if result.ok:
                 self.get_logger().info(f'{self.controller_name} activated.')
+                self._activated = True
+                self._start_pulsing()
+                return
             else:
-                self.get_logger().warn(f'Failed to activate {self.controller_name}, will still pulse reset_fault.')
+                self.get_logger().warn(
+                    f'Failed to activate {self.controller_name} (controller not loaded yet), retrying in {self.repeat_interval}s...')
         except Exception as e:
-            self.get_logger().warn(f'SwitchController call failed: {e}')
-        self._activated = True
-        self._start_pulsing()
+            self.get_logger().warn(f'SwitchController call failed: {e}, retrying...')
+        # Retry: keep init timer alive until success
+        self._activated = False
+        if self._init_timer is None:
+            self._init_timer = self.create_timer(self.repeat_interval, self.try_activate)
 
     def _start_pulsing(self):
         if self._init_timer is not None:

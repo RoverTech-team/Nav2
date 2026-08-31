@@ -73,7 +73,7 @@ def generate_launch_description():
         actions=[Node(
             package='controller_manager',
             executable='spawner',
-            arguments=['brake_release_controller', '--inactive'],
+            arguments=['brake_release_controller'],
         )]
     )
 
