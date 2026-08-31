@@ -19,7 +19,8 @@ import math
 
 import rclpy
 from rclpy.action import ActionClient
-from rclpy.duration import Duration
+from rclpy.duration import Duration as RclpyDuration
+from builtin_interfaces.msg import Duration as RosDuration
 from rclpy.node import Node
 from geometry_msgs.msg import PoseArray, PoseStamped
 from std_msgs.msg import Int32MultiArray, String
@@ -338,14 +339,15 @@ class MarkerNavigatorNode(Node):
         if self._search_stage == "spin":
             goal = Spin.Goal()
             goal.target_yaw = self._spin_full_turn
-            goal.time_allowance = Duration(seconds=self._spin_full_turn / max(self._rotate_speed, 0.05) + 10.0)
+            secs = self._spin_full_turn / max(self._rotate_speed, 0.05) + 10.0
+            goal.time_allowance = RosDuration(sec=int(secs), nanosec=int((secs % 1) * 1e9))
             self.get_logger().info("SEARCH: spinning a full turn")
             self._send_action("spin", goal)
         else:
             goal = DriveOnHeading.Goal()
             goal.target_distance = self._explore_step
             goal.speed = self._explore_step / 4.0 if self._explore_step > 0 else 0.1
-            goal.time_allowance = Duration(seconds=15.0)
+            goal.time_allowance = RosDuration(sec=15, nanosec=0)
             self.get_logger().info(f"SEARCH: stepping forward {self._explore_step} m")
             self._send_action("step", goal)
 
