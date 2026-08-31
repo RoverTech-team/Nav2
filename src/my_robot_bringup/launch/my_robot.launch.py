@@ -88,7 +88,7 @@ def generate_launch_description():
                 'pulse_duration': 1.0,
                 'repeat_interval': 5.0,
                 'auto_repeat': True,
-                'activate_controller': True,
+                'activate_controller': False,
             }],
         )]
     )
