@@ -1,3 +1,15 @@
+import os as _os
+import sys as _sys
+# ── numpy compat shim ───────────────────────────────────────────────
+_numpy_user = _os.path.expanduser("~/.local/lib/python3.10/site-packages")
+_numpy_sys = "/usr/lib/python3/dist-packages"
+_numpy_roshub = "/opt/ros/humble/lib/python3/dist-packages"
+_clean = [p for p in _sys.path if p != _numpy_user]
+_safe = [_numpy_roshub, _numpy_sys] + _clean
+_sys.path = _safe
+_os.environ["PYTHONPATH"] = ":".join(_safe)
+# ── end shim ─────────────────────────────────────────────────────────
+
 import itertools
 import json
 import math
@@ -279,10 +291,14 @@ class AttitudeNode(Node):
         if not self._pc_client.wait_for_service(timeout_sec=0.2):
             return
         req = SetParameters.Request()
-        from rcl_interfaces.msg import Parameter
+        from rcl_interfaces.msg import Parameter, ParameterType
         param = Parameter()
         param.name = "depth.point_cloud_freq"
-        param.value.type = Parameter.Type.DOUBLE
+        # Use ParameterType constant (Humble: no Parameter.Type enum)
+        try:
+            param.value.type = ParameterType.PARAMETER_DOUBLE
+        except AttributeError:
+            param.value.type = 3  # PARAMETER_DOUBLE
         param.value.double_value = rate
         req.parameters = [param]
         future = self._pc_client.call_async(req)
